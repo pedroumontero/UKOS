@@ -1,0 +1,13 @@
+# Copiado a /etc/caddy/Caddyfile por tailscale/apply-ukos-internal-dns-proxy.sh
+# CADDY_BIND_ADDR = IPv4 Tailscale (systemd). TLS interno; futuro: ACME en ukos.tech.
+ukos.tech {
+	bind {$CADDY_BIND_ADDR}
+	reverse_proxy 127.0.0.1:3000
+	tls internal
+}
+
+dev-ukos.tech {
+	bind {$CADDY_BIND_ADDR}
+	reverse_proxy 127.0.0.1:3001
+	tls internal
+}

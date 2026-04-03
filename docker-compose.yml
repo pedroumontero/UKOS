@@ -1,0 +1,46 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: ukos-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ukos
+      POSTGRES_USER: ukos
+      POSTGRES_PASSWORD: ukos
+    ports:
+      - "5432:5432"
+    volumes:
+      - ukos-postgres-data:/var/lib/postgresql/data
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: prod
+      args:
+        # Opcional: p. ej. fecha-git. Si se omite, Dockerfile usa fecha UTC al construir.
+        NEXT_PUBLIC_UKOS_BUILD: ${UKOS_UI_BUILD:-}
+        # true = sidebar muestra linea "Build …" (solo verificacion; en produccion dejar false)
+        NEXT_PUBLIC_UKOS_SHOW_BUILD_STAMP: ${UKOS_SHOW_BUILD_STAMP:-false}
+    container_name: ukos-app
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgresql://ukos:ukos@db:5432/ukos?schema=public
+      AUTH_SECRET: ${AUTH_SECRET:-change-me-super-secret-auth-key}
+      # Detrás de Caddy / otro proxy: NextAuth usa cabeceras X-Forwarded-*.
+      AUTH_TRUST_HOST: "true"
+      # URL canónica en el navegador (p. ej. https://ukos.com con Split DNS + Caddy en la VM).
+      NEXTAUTH_URL: ${UKOS_PUBLIC_BASE_URL:-http://localhost:3000}
+      APP_URL: ${UKOS_PUBLIC_BASE_URL:-http://localhost:3000}
+      DEFAULT_COMPANY_SLUG: ${DEFAULT_COMPANY_SLUG:-ukos-demo}
+    ports:
+      - "3000:3000"
+    volumes:
+      # Persistir subidas entre recreaciones del contenedor (sin esto las URLs en DB apuntan a archivos inexistentes).
+      - ukos-uploads:/app/public/uploads
+    # Produccion: imagen autocontenida (next start). Para dev con volumenes: docker-compose.dev.yml
+
+volumes:
+  ukos-postgres-data:
+  ukos-uploads:

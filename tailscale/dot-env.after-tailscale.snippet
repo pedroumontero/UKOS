@@ -1,0 +1,7 @@
+# Tras autenticar el nodo (`sudo tailscale up`), toma el hostname MagicDNS o la IP 100.x de
+# `tailscale status` y sustituye REPLACE_HOST abajo (sin inventar el sufijo .ts.net hasta tenerlo).
+#
+# Con Docker Compose basta con UKOS_PUBLIC_BASE_URL; NEXTAUTH_URL y APP_URL son opcionales en .env
+# si solo usas el contenedor (compose ya las deriva de UKOS_PUBLIC_BASE_URL).
+
+UKOS_PUBLIC_BASE_URL="http://REPLACE_HOST:3000"

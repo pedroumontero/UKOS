@@ -1,0 +1,356 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ModuleKey {
+  MARKET_FLOW
+}
+
+enum UserRole {
+  SUPERADMIN
+  ADMIN
+  OPERATOR
+}
+
+enum ProductUnitStatus {
+  DRAFT
+  RECEIVED
+  READY_TO_PUBLISH
+  PUBLISHED
+  SOLD
+}
+
+enum PublicationStatus {
+  PENDING
+  PUBLISHED
+}
+
+enum AccessOverrideEffect {
+  ALLOW
+  DENY
+}
+
+enum LeadResolution {
+  OPEN
+  IN_CONVERSATION
+  INTERESTED
+  CLOSED
+  LOST
+}
+
+enum ConversationStatus {
+  ACTIVE
+  PAUSED
+  CLOSED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageAuthorType {
+  HUMAN
+  AI
+  LEAD
+  SYSTEM
+}
+
+enum AISuggestionType {
+  SPEC_EXTRACTION
+  TITLE
+  DESCRIPTION
+  PRICE_RANGE
+  REPLY
+}
+
+model Company {
+  id              String                  @id @default(cuid())
+  name            String
+  slug            String                  @unique
+  status          String                  @default("active")
+  defaultCurrency String                  @default("USD")
+  timezone        String                  @default("America/New_York")
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  activeUsers     User[]                  @relation("ActiveCompanyUsers")
+  modules         CompanyModule[]
+  moduleSettings  CompanyModuleSettings[]
+  channels        Channel[]
+  productUnits    ProductUnit[]
+  leads           Lead[]
+  aiSuggestions   AISuggestion[]
+  activityLogs    ActivityLog[]
+  companyRoles    CompanyRole[]
+  memberships     CompanyMembership[]
+  userAccessOverrides CompanyUserAccessOverride[]
+}
+
+model CompanyModule {
+  id        String    @id @default(cuid())
+  companyId String
+  moduleKey ModuleKey
+  isEnabled Boolean   @default(true)
+  enabledAt DateTime  @default(now())
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, moduleKey])
+}
+
+model CompanyModuleSettings {
+  id                   String    @id @default(cuid())
+  companyId            String
+  moduleKey            ModuleKey
+  industryType         String    @default("Tecnologia / Hardware")
+  aiToneProfile        String    @default("Vendedor amable y profesional")
+  defaultPriceStrategy String    @default("manual")
+  settingsJson         Json?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  company              Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, moduleKey])
+}
+
+model User {
+  id              String                @id @default(cuid())
+  email           String                @unique
+  name            String
+  passwordHash    String
+  role            UserRole              @default(OPERATOR)
+  activeCompanyId String
+  lastLoginAt     DateTime?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  activeCompany   Company               @relation("ActiveCompanyUsers", fields: [activeCompanyId], references: [id], onDelete: Cascade)
+  activityLogs    ActivityLog[]
+  memberships     CompanyMembership[]
+  accessOverrides CompanyUserAccessOverride[]
+}
+
+/// Rol definido dentro de un tenant (companyId). Sin filas globales compartidas entre empresas.
+model CompanyRole {
+  id          String                    @id @default(cuid())
+  companyId   String
+  name        String
+  slug        String
+  description String?
+  isSystem    Boolean                   @default(false)
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+  company     Company                   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  permissions CompanyRolePermission[]
+  memberships CompanyMembership[]
+
+  @@unique([companyId, slug])
+  @@index([companyId])
+}
+
+/// Accesos del rol; permissionKey alineado con src/lib/access-catalog.ts
+model CompanyRolePermission {
+  id            String      @id @default(cuid())
+  companyRoleId String
+  permissionKey String
+  companyRole   CompanyRole @relation(fields: [companyRoleId], references: [id], onDelete: Cascade)
+
+  @@unique([companyRoleId, permissionKey])
+  @@index([permissionKey])
+}
+
+/// Membresia usuario-empresa-rol dentro del tenant. Un usuario solo puede tener un rol por empresa (fase 1).
+model CompanyMembership {
+  id            String      @id @default(cuid())
+  companyId   String
+  userId      String
+  companyRoleId String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  company     Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyRole CompanyRole @relation(fields: [companyRoleId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, companyId])
+  @@index([companyId])
+  @@index([userId])
+}
+
+/// Allow/Deny por usuario dentro del tenant (encima del rol).
+model CompanyUserAccessOverride {
+  id        String               @id @default(cuid())
+  companyId String
+  userId    String
+  accessKey String
+  effect    AccessOverrideEffect
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  company   Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, companyId, accessKey])
+  @@index([companyId])
+  @@index([userId])
+}
+
+model Channel {
+  id           String        @id @default(cuid())
+  companyId    String
+  code         String
+  displayName  String
+  isEnabled    Boolean       @default(true)
+  sortOrder    Int           @default(0)
+  configJson   Json?
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  publications Publication[]
+  leads        Lead[]
+
+  @@unique([companyId, code])
+}
+
+model ProductUnit {
+  id           String             @id @default(cuid())
+  companyId    String
+  number       String
+  title        String
+  brand        String?
+  model        String?
+  category     String?
+  condition    String?
+  status       ProductUnitStatus  @default(DRAFT)
+  costAmount   Decimal?           @db.Decimal(10, 2)
+  salePrice    Decimal?           @db.Decimal(10, 2)
+  registeredAt DateTime           @default(now())
+  notes        String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  company      Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  specs        ProductSpec[]
+  media        ProductMedia[]
+  publications Publication[]
+  leads        Lead[]
+
+  @@unique([companyId, number])
+  @@index([companyId, status])
+}
+
+model ProductSpec {
+  id              String      @id @default(cuid())
+  unitId          String
+  key             String
+  value           String
+  source          String      @default("manual")
+  confidenceScore Decimal?    @db.Decimal(4, 2)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  unit            ProductUnit @relation(fields: [unitId], references: [id], onDelete: Cascade)
+}
+
+model ProductMedia {
+  id         String      @id @default(cuid())
+  unitId     String
+  fileUrl    String
+  fileName   String
+  sortOrder  Int         @default(0)
+  isPrimary  Boolean     @default(false)
+  capturedAt DateTime    @default(now())
+  createdAt  DateTime    @default(now())
+  unit       ProductUnit @relation(fields: [unitId], references: [id], onDelete: Cascade)
+}
+
+model Publication {
+  id                   String            @id @default(cuid())
+  unitId               String
+  channelId            String
+  status               PublicationStatus @default(PENDING)
+  generatedTitle       String?
+  generatedDescription String?
+  suggestedPriceHigh   Decimal?          @db.Decimal(10, 2)
+  suggestedPriceMid    Decimal?          @db.Decimal(10, 2)
+  suggestedPriceLow    Decimal?          @db.Decimal(10, 2)
+  publishedPrice       Decimal?          @db.Decimal(10, 2)
+  externalUrl          String?
+  publishedAt          DateTime?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  unit                 ProductUnit       @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  channel              Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  leads                Lead[]
+
+  @@unique([unitId, channelId])
+}
+
+model Lead {
+  id                    String         @id @default(cuid())
+  companyId             String
+  displayName           String
+  contactValue          String?
+  channelId             String?
+  unitId                String?
+  publicationId         String?
+  createdAt             DateTime       @default(now())
+  hasActiveConversation Boolean        @default(true)
+  resolution            LeadResolution @default(OPEN)
+  notes                 String?
+  company               Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  channel               Channel?       @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  unit                  ProductUnit?   @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  publication           Publication?   @relation(fields: [publicationId], references: [id], onDelete: SetNull)
+  conversations         Conversation[]
+}
+
+model Conversation {
+  id            String             @id @default(cuid())
+  leadId        String
+  status        ConversationStatus @default(ACTIVE)
+  summary       String?
+  lastMessageAt DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  lead          Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  messages      Message[]
+}
+
+model Message {
+  id             String            @id @default(cuid())
+  conversationId String
+  direction      MessageDirection
+  authorType     MessageAuthorType
+  content        String
+  sentAt         DateTime          @default(now())
+  createdAt      DateTime          @default(now())
+  conversation   Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+model AISuggestion {
+  id             String           @id @default(cuid())
+  companyId      String
+  entityType     String
+  entityId       String
+  suggestionType AISuggestionType
+  payloadJson    Json
+  acceptedAt     DateTime?
+  rejectedAt     DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  company        Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+}
+
+model ActivityLog {
+  id           String   @id @default(cuid())
+  companyId    String
+  actorUserId  String?
+  entityType   String
+  entityId     String
+  activityType String
+  label        String
+  payloadJson  Json?
+  createdAt    DateTime @default(now())
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  actorUser    User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, entityType, entityId])
+}

@@ -1,0 +1,10 @@
+# Desarrollo local con codigo montado y hot reload:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+services:
+  app:
+    build:
+      target: dev
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: sh -c "npm install && npx prisma generate && npx prisma migrate deploy && npm run dev"

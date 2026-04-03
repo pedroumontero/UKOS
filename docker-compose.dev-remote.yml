@@ -1,0 +1,48 @@
+# UKOS en modo desarrollo (hot reload) en puerto 3001, sin tocar ukos-app :3000.
+# Misma red y misma DB que producción (servicio `db` / ukos-db).
+#
+# Arrancar:  docker compose -f docker-compose.dev-remote.yml up -d --build
+# Parar:     docker compose -f docker-compose.dev-remote.yml down
+# Logs:      docker compose -f docker-compose.dev-remote.yml logs -f app-dev
+#
+# Entrar con Tailscale (recomendado):
+#   https://dev-ukos.tech
+# O por IP tailnet:
+#   http://100.71.178.53:3001
+#
+# Usa https://dev-ukos.tech en el navegador. NEXTAUTH_URL debe coincidir con la URL que pongas en el navegador; por defecto https://dev-ukos.tech (Split DNS).
+# Si solo usarás la IP tailnet sin nombre: http://100.71.178.53:3001 (sin Caddy TLS).
+
+services:
+  app-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev
+    container_name: ukos-app-dev
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://ukos:ukos@db:5432/ukos?schema=public
+      AUTH_TRUST_HOST: "true"
+      NEXTAUTH_URL: ${UKOS_DEV_URL:-https://dev-ukos.tech}
+      NEXT_PUBLIC_NEXTAUTH_URL: ${UKOS_DEV_URL:-https://dev-ukos.tech}
+      APP_URL: ${UKOS_DEV_URL:-https://dev-ukos.tech}
+      DEFAULT_COMPANY_SLUG: ${DEFAULT_COMPANY_SLUG:-ukos-demo}
+    ports:
+      - "3001:3000"
+    volumes:
+      - .:/app
+      - ukos-app-dev-node-modules:/app/node_modules
+    command: >
+      sh -c "npm install && npx prisma generate && npx prisma migrate deploy && npm run dev"
+    networks:
+      - ukos_default
+
+networks:
+  ukos_default:
+    external: true
+
+volumes:
+  ukos-app-dev-node-modules:
