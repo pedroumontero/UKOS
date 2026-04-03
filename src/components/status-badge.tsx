@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 const labels: Record<ProductUnitStatus, string> = {
   DRAFT: "Borrador",
   RECEIVED: "Recibido",
-  READY_TO_PUBLISH: "Listo Para Publicar",
+  READY_TO_PUBLISH: "Por publicar",
   PUBLISHED: "Publicado",
   SOLD: "Vendido",
 };

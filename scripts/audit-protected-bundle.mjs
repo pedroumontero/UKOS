@@ -114,7 +114,8 @@ async function main() {
   console.log("GET /dashboard final status:", dashRes.status, "bytes:", dashText.length);
 
   const inHtml = dashText.includes(MARKER);
-  const hasLoginForm = dashText.includes("Entrar A Tu Espacio Operativo") || dashText.includes("admin@ukos.local");
+  const hasLoginForm =
+    dashText.includes("Entrar a tu espacio operativo") || dashText.includes("admin@ukos.local");
   console.log("Marker in /dashboard HTML:", inHtml);
   console.log("Looks like login page (unauthenticated):", hasLoginForm && dashText.length < 40000);
 

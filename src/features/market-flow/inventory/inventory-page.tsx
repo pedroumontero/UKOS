@@ -42,7 +42,7 @@ const statusTabs = [
   { label: "Todos", value: "all" },
   { label: "Borrador", value: "DRAFT" },
   { label: "Recibido", value: "RECEIVED" },
-  { label: "Listo para publicar", value: "READY_TO_PUBLISH" },
+  { label: "Por publicar", value: "READY_TO_PUBLISH" },
   { label: "Publicado", value: "PUBLISHED" },
   { label: "Vendido", value: "SOLD" },
 ] as const;

@@ -46,7 +46,7 @@ export default async function MarketFlowDashboardPage() {
           href="/market-flow/inventario?estado=DRAFT"
         />
         <MetricCard
-          label="Listo para publicar"
+          label="Por publicar"
           value={counts.readyToPublish}
           helper="Filtrar listos"
           icon={SendToBack}
@@ -73,7 +73,7 @@ export default async function MarketFlowDashboardPage() {
               [
                 ["Borrador", counts.draft, "DRAFT"],
                 ["Recibido", counts.received, "RECEIVED"],
-                ["Listo para publicar", counts.readyToPublish, "READY_TO_PUBLISH"],
+                ["Por publicar", counts.readyToPublish, "READY_TO_PUBLISH"],
                 ["Publicado", counts.published, "PUBLISHED"],
                 ["Vendido", counts.sold, "SOLD"],
               ] as const

@@ -16,21 +16,21 @@ export default async function LoginPage() {
       <div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-6xl items-center justify-center gap-12 lg:grid lg:grid-cols-[1.1fr_0.9fr]">
         <div className="hidden lg:block">
           <div className="max-w-xl space-y-6">
-            <div className="inline-flex rounded-full border border-border/70 bg-background/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground backdrop-blur">
-              Mobile-First SaaS Premium
+            <div className="inline-flex rounded-full border border-border/70 bg-background/80 px-3 py-1 text-xs font-semibold tracking-tight text-muted-foreground backdrop-blur">
+              Plataforma modular para operar y crecer
             </div>
             <div className="space-y-4">
               <h1 className="text-5xl font-semibold tracking-tight text-foreground">UKOS + Market Flow</h1>
               <p className="text-lg leading-8 text-muted-foreground">
-                Base seria para operar inventario, publicar por canal y preparar automatizacion comercial sin caer en un ERP frio.
+                Centraliza administración, CRM, ventas, inventario y punto de venta en módulos que puedes activar según tu etapa. Control operativo real, sin la rigidez de un ERP tradicional ni herramientas sueltas que no conversan entre sí.
               </p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               {[
-                "Multiempresa por empresa activa",
-                "Tema claro y oscuro",
-                "Inventario por unidad",
-                "Publicar y leads integrados",
+                "Multiempresa con cambio de contexto al instante",
+                "Interfaz clara u oscura para cualquier entorno",
+                "Inventario preciso por unidad",
+                "Canales, publicar y leads en un solo flujo",
               ].map((item) => (
                 <div key={item} className="rounded-[1.75rem] border border-border/60 bg-card/80 p-5 shadow-sm backdrop-blur">
                   <p className="font-medium text-foreground">{item}</p>
