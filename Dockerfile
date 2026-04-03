@@ -3,7 +3,7 @@ WORKDIR /app
 RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 FROM base AS deps
-COPY package.json package-lock.json* ./
+COPY package.json package-lock.json* .npmrc ./
 COPY prisma ./prisma
 COPY prisma.config.ts ./
 RUN npm install
