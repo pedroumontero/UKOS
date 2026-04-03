@@ -6,6 +6,21 @@ const nextAuthUrlForClient = process.env.NEXTAUTH_URL ?? process.env.NEXT_PUBLIC
 
 const nextConfig: NextConfig = {
   ...(nextAuthUrlForClient ? { env: { NEXTAUTH_URL: nextAuthUrlForClient } } : {}),
+  /**
+   * Solo `next dev` (NODE_ENV=development). Evita que el navegador cachee HTML/RSC y muestre copy vieja tras guardar.
+   * `next build` / `next start` (PROD) evalúan esto con NODE_ENV=production → sin headers extra.
+   */
+  async headers() {
+    if (process.env.NODE_ENV !== "development") {
+      return [];
+    }
+    return [
+      {
+        source: "/:path*",
+        headers: [{ key: "Cache-Control", value: "private, no-store, max-age=0, must-revalidate" }],
+      },
+    ];
+  },
   // Dev: permitir /_next/* (chunks, HMR) cuando el navegador envía Origin desde estos hosts.
   // Sin el hostname Tailscale, Next dev responde 403 a los chunks y el cliente queda roto (login incluido).
   allowedDevOrigins: [

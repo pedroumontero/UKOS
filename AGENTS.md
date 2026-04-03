@@ -4,12 +4,76 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
-## Deploy obligatorio (UKOS en produccion)
+# Política de entornos y despliegue
 
-En el servidor donde corre **ukos.com** (Docker + Caddy → `127.0.0.1:3000`), **cada tarea que cambie codigo** debe terminar con deploy real:
+Documento operativo permanente. El agente de asistencia al código debe cumplirlo sin excepción.
 
-1. Desde la raiz del repo: `npm run deploy:prod` (o `bash scripts/deploy-ukos-prod.sh`).
-2. Eso ejecuta `docker compose build --no-cache app`, `up -d --force-recreate app`, comprobaciones en el contenedor y `npm run audit:protected-bundle` contra `UKOS_PUBLIC_BASE_URL` del `.env`.
-3. **No cerrar** un cambio de producto sin que el audit pase y ukos.com sirva el bundle nuevo.
+## Separación obligatoria entre DEV y PROD
 
-**Marcador de build en UI (opcional):** con `UKOS_SHOW_BUILD_STAMP=true` en el entorno de **build** (arg de compose) el sidebar muestra una linea `Build …`. Por defecto va en `false` para usuarios finales. El identificador siempre queda incrustado en el cliente como `NEXT_PUBLIC_UKOS_BUILD`.
+- DEV y PROD son entornos separados.
+- DEV existe para desarrollo, pruebas, validación y troubleshooting.
+- PROD existe solo para releases autorizados.
+
+## Entorno DEV
+
+| Concepto | Valor |
+|----------|--------|
+| URL pública | `dev-ukos.tech` |
+| Contenedor | `ukos-app-dev` |
+| Compose | `docker-compose.dev-remote.yml` |
+| Puerto en host | `3001` |
+
+## Entorno PROD
+
+| Concepto | Valor |
+|----------|--------|
+| URL pública | `ukos.tech` |
+| Contenedor | `ukos-app` |
+| Compose | `docker-compose.yml` |
+| Puerto en host | `3000` |
+
+## Regla obligatoria para el agente
+
+Si una tarea ocurre en DEV o se enmarca en desarrollo o troubleshooting:
+
+- El agente **solo** puede trabajar sobre **DEV** (código, contenedor `ukos-app-dev`, compose de desarrollo, puerto `3001`, URL `dev-ukos.tech`).
+- El agente **no** puede tocar **PROD**.
+- El agente **no** puede reconstruir la imagen o contenedor **`ukos-app`** por iniciativa propia.
+- El agente **no** puede ejecutar `npm run deploy:prod` ni `bash scripts/deploy-ukos-prod.sh` sin orden explícita.
+- El agente **no** puede recrear el contenedor de producción por iniciativa propia.
+- El agente **no** puede promover cambios de DEV a PROD por decisión propia.
+
+## Autorización de producción
+
+La producción solo se modifica o despliega si **Pedro** lo ordena **explícitamente**.
+
+Ejemplos de autorización explícita (lista no exhaustiva):
+
+- «Haz deploy a prod.»
+- «Despliega a producción.»
+- «Publica esto en producción.»
+
+Sin una instrucción explícita de Pedro, cualquier arreglo o cambio validado en DEV debe **permanecer solo en DEV**.
+
+## Flujo correcto
+
+1. Cambios y pruebas en la rama de trabajo acordada (p. ej. `develop`).
+2. Validación en **DEV** (`dev-ukos.tech`).
+3. Promoción a `main` (o rama de release) **cuando Pedro lo decida**.
+4. Deploy a **PROD** ejecutado **únicamente** con autorización explícita de Pedro.
+
+## Regla de seguridad operativa
+
+Si el agente considera que un cambio probado en DEV debería pasar a PROD:
+
+- Debe **informarlo** con claridad.
+- Puede **recomendarlo** si es razonable.
+- **No** debe desplegarlo ni actuar sobre PROD por cuenta propia.
+
+---
+
+## Referencia técnica (solo tras autorización explícita de Pedro)
+
+Cuando Pedro haya ordenado explícitamente un deploy a producción, la secuencia esperada en este repositorio incluye `npm run deploy:prod` (envuelve `scripts/deploy-ukos-prod.sh`: build sin caché del servicio `app`, recreación de `ukos-app`, comprobaciones y `audit:protected-bundle` contra `UKOS_PUBLIC_BASE_URL` del `.env`). Hasta recibir esa orden, el agente no ejecuta estos pasos.
+
+**Marcador de build en UI (opcional):** con `UKOS_SHOW_BUILD_STAMP=true` en el entorno de build (arg de compose) el sidebar puede mostrar una línea `Build …`. Por defecto debe ir en `false` para usuarios finales. El identificador puede incrustarse en el cliente como `NEXT_PUBLIC_UKOS_BUILD`.

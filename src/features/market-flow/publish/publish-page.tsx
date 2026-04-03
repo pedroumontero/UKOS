@@ -213,7 +213,7 @@ export function PublishPage({ entries, initialChannelId }: PublishPageProps) {
             <Megaphone className="size-8 text-muted-foreground" />
             <h3 className="mt-4 text-lg font-semibold">Sin Pendientes Por Publicar</h3>
             <p className="mt-2 max-w-md text-sm text-muted-foreground">
-              Cuando una unidad pase a Listo Para Publicar y aun no este marcada en un canal, aparecera aqui automaticamente.
+              Cuando una unidad esté en estado por publicar y aún no esté marcada en un canal, aparecerá aquí automáticamente.
             </p>
           </div>
         )}
@@ -225,7 +225,7 @@ export function PublishPage({ entries, initialChannelId }: PublishPageProps) {
 const unitStatusLabels: Record<string, string> = {
   DRAFT: "Borrador",
   RECEIVED: "Recibido",
-  READY_TO_PUBLISH: "Listo para publicar",
+  READY_TO_PUBLISH: "Por publicar",
   PUBLISHED: "Publicado",
   SOLD: "Vendido",
 };

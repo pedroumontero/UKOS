@@ -5,7 +5,9 @@
   "scripts": {
     "postinstall": "prisma generate",
     "dev": "next dev --hostname 0.0.0.0",
+    "dev:docker": "WATCHPACK_POLLING=1 CHOKIDAR_USEPOLLING=1 next dev --hostname 0.0.0.0 --webpack",
     "clean": "rm -rf .next",
+    "dev:reset-cache": "bash scripts/reset-dev-next-cache.sh",
     "build": "next build",
     "start": "next start --hostname 0.0.0.0 --port 3000",
     "lint": "eslint .",

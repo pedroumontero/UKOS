@@ -3,16 +3,16 @@
 import * as React from "react";
 import { LoaderCircle } from "lucide-react";
 import { signIn } from "next-auth/react";
-import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-function callbackPathFromSearchParams(searchParams: ReturnType<typeof useSearchParams>) {
-  const raw = searchParams.get("callbackUrl");
+/** Lee callbackUrl solo en el cliente (submit), evita useSearchParams y errores de hidratación. */
+function callbackPathFromLocationSearch(search: string) {
+  const raw = new URLSearchParams(search).get("callbackUrl");
   if (raw && raw.startsWith("/") && !raw.startsWith("//")) {
     return raw;
   }
@@ -41,7 +41,6 @@ function isCredentialSignInFailure(url: string | null | undefined) {
 }
 
 export function LoginForm() {
-  const searchParams = useSearchParams();
   const [pending, startTransition] = React.useTransition();
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -49,7 +48,7 @@ export function LoginForm() {
     const formData = new FormData(event.currentTarget);
 
     startTransition(async () => {
-      const path = callbackPathFromSearchParams(searchParams);
+      const path = callbackPathFromLocationSearch(window.location.search);
       const callbackUrl = `${window.location.origin}${path}`;
 
       const result = await signIn("credentials", {
@@ -72,13 +71,10 @@ export function LoginForm() {
   return (
     <Card className="w-full rounded-[2rem] border-border/70 bg-card/95 shadow-2xl shadow-black/5">
       <CardHeader className="space-y-3 pb-2">
-        <div className="inline-flex w-fit rounded-full border border-border/70 bg-background px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+        <div className="inline-flex w-fit rounded-full border border-border/70 bg-background px-3 py-1 text-xs font-semibold tracking-tight text-muted-foreground">
           UKOS
         </div>
-        <CardTitle className="text-2xl tracking-tight">Entrar A Tu Espacio Operativo</CardTitle>
-        <CardDescription>
-          Usa la cuenta demo inicial para arrancar: <strong>admin@ukos.local</strong> / <strong>admin123</strong>
-        </CardDescription>
+        <CardTitle className="text-2xl tracking-tight">Entrar a tu espacio operativo</CardTitle>
       </CardHeader>
       <CardContent>
         <form className="space-y-5" method="post" onSubmit={handleSubmit}>
