@@ -1308,8 +1308,8 @@ function Meta({ label, value }: { label: string; value: string }) {
 function TruncatedTextWithTooltip({ text, className }: { text: string; className?: string }) {
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <p className={cn("block w-full truncate", className)}>{text}</p>
+      <TooltipTrigger className={cn("block w-full cursor-default truncate text-left", className)}>
+        {text}
       </TooltipTrigger>
       <TooltipContent className="max-w-[28rem] whitespace-normal break-words">{text}</TooltipContent>
     </Tooltip>
