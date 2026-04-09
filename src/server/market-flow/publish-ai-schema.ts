@@ -97,7 +97,13 @@ export function normalizePublicationListingResult(raw: unknown): PublicationList
   };
 }
 
-/** Orden high >= mid >= low; precio bajo estrictamente mayor que costo cuando hay costo. */
+/**
+ * Orden high >= mid >= low con márgenes OPTIMISTAS sobre costo.
+ * Política: priorizar ganancia > velocidad de venta.
+ *   priceLow  >= costo × 1.15  (piso estratégico, min 15%)
+ *   priceMid  >= costo × 1.28  (precio medio real, min 28%)
+ *   priceHigh >= costo × 1.45  (precio ambicioso, min 45%)
+ */
 export function enforcePublicationPriceRules(
   data: PublicationListingAiResult,
   cost: number | null,
@@ -123,35 +129,29 @@ export function enforcePublicationPriceRules(
     [l, m, h] = [...arr].sort((x, y) => x - y);
   }
 
-  const minAboveCost =
-    cost != null && Number.isFinite(cost) && cost > 0 ? Math.ceil(cost * 1.05 * 100) / 100 : null;
+  if (cost != null && Number.isFinite(cost) && cost > 0) {
+    const floorLow  = Math.ceil(cost * 1.15 * 100) / 100;
+    const floorMid  = Math.ceil(cost * 1.28 * 100) / 100;
+    const floorHigh = Math.ceil(cost * 1.45 * 100) / 100;
 
-  if (minAboveCost != null && cost != null) {
-    if (l <= cost) {
-      l = minAboveCost;
-    }
-    if (m < l) {
-      m = l;
-    }
-    if (h < m) {
-      h = m;
-    }
+    if (l == null || l < floorLow)  l = floorLow;
+    if (m == null || m < floorMid)  m = floorMid;
+    if (h == null || h < floorHigh) h = floorHigh;
+
+    // Garantizar orden estricto
+    if (m < l) m = l;
+    if (h < m) h = m;
+    // Si high y mid quedaron iguales, separar un poco
     if (h <= m) {
-      h = Math.ceil((m + Math.max(m * 0.08, 5)) * 100) / 100;
+      h = Math.ceil((m + Math.max(m * 0.10, 8)) * 100) / 100;
     }
     if (m <= l && h > l) {
       m = Math.round(((l + h) / 2) * 100) / 100;
-      if (m < l) {
-        m = l;
-      }
+      if (m < l) m = l;
     }
   } else {
-    if (m < l) {
-      m = l;
-    }
-    if (h < m) {
-      h = m;
-    }
+    if (m < l) m = l;
+    if (h < m) h = m;
   }
 
   return {

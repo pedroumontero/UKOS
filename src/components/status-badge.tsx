@@ -21,6 +21,14 @@ export function StatusBadge({ status }: { status: ProductUnitStatus }) {
   return <Badge className={variants[status]}>{labels[status]}</Badge>;
 }
 
+/** Etiqueta en español para formularios, tablas y el trigger del Select (evita mostrar el enum técnico). */
+export function getProductUnitStatusLabel(value: unknown): string {
+  if (value == null || value === "") return "";
+  const key = String(value);
+  const label = labels[key as ProductUnitStatus];
+  return label ?? key;
+}
+
 export const productStatusOptions = [
   { value: ProductUnitStatus.DRAFT, label: labels.DRAFT },
   { value: ProductUnitStatus.RECEIVED, label: labels.RECEIVED },

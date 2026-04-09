@@ -41,6 +41,7 @@ COPY --from=prod_builder /app/public ./public
 COPY --from=prod_builder /app/package.json ./package.json
 COPY --from=prod_builder /app/package-lock.json ./package-lock.json
 COPY --from=prod_builder /app/next.config.ts ./next.config.ts
+COPY --from=prod_builder /app/lib-upload-limits.ts ./lib-upload-limits.ts
 COPY --from=prod_builder /app/prisma ./prisma
 COPY --from=prod_builder /app/prisma.config.ts ./prisma.config.ts
 EXPOSE 3000

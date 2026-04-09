@@ -3,26 +3,34 @@ import { Suspense } from "react";
 import { ProtectedPageShell } from "@/app/(protected)/layout";
 import { PublishPage } from "@/features/market-flow/publish/publish-page";
 import { getAppContext } from "@/server/app-context";
-import { getPublishQueue } from "@/server/market-flow/publish";
+import { getPublicationEntryById, getPublishQueue } from "@/server/market-flow/publish";
 import { requireAccess } from "@/server/tenant-authorization";
 
 type PageProps = {
-  searchParams?: Promise<{ canal?: string }>;
+  searchParams?: Promise<{ canal?: string; publicacion?: string }>;
 };
 
 export default async function MarketFlowPublishPage({ searchParams }: PageProps) {
   await requireAccess("market_flow.publish.view");
   const { company } = await getAppContext();
-  const entries = await getPublishQueue(company.id);
   const resolved = searchParams ? await searchParams : {};
-  const initialChannelId = resolved.canal ?? null;
+  const publicationFocusId = typeof resolved.publicacion === "string" ? resolved.publicacion.trim() : "";
+
+  const queue = await getPublishQueue(company.id);
+  const focused =
+    publicationFocusId.length > 0 ? await getPublicationEntryById(company.id, publicationFocusId) : null;
+
+  const entries =
+    focused && !queue.some((e) => e.id === focused.id) ? [focused, ...queue] : queue;
+
+  const initialChannelId = focused?.channel.id ?? resolved.canal ?? null;
 
   return (
     <ProtectedPageShell
       companyName={company.name}
       moduleLabel="Market Flow"
       title="Publicar"
-      description="Cola real por canal: edita copy, precios y marca cuando ya salio al marketplace."
+      description="Cola por canal: lo pendiente aparece aquí; lo ya publicado sigue en Inventario y puedes reabrirlo con Gestionar publicación."
     >
       <Suspense
         fallback={

@@ -13,6 +13,8 @@ export type InventoryUnit = {
   salePrice: string | null;
   registeredAt: Date;
   notes: string | null;
+  /** Contexto para el asistente de IA; persistido en servidor. */
+  aiContext: string | null;
   media: Array<{
     id: string;
     fileUrl: string;

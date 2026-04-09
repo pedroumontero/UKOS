@@ -89,6 +89,7 @@ model Company {
   companyRoles    CompanyRole[]
   memberships     CompanyMembership[]
   userAccessOverrides CompanyUserAccessOverride[]
+  inventoryMobileUploadSessions InventoryMobileUploadSession[]
 }
 
 model CompanyModule {
@@ -131,6 +132,7 @@ model User {
   activityLogs    ActivityLog[]
   memberships     CompanyMembership[]
   accessOverrides CompanyUserAccessOverride[]
+  inventoryMobileUploadSessions InventoryMobileUploadSession[]
 }
 
 /// Rol definido dentro de un tenant (companyId). Sin filas globales compartidas entre empresas.
@@ -225,6 +227,8 @@ model ProductUnit {
   salePrice    Decimal?           @db.Decimal(10, 2)
   registeredAt DateTime           @default(now())
   notes        String?
+  /// Contexto libre para el asistente de IA en inventario (persistido con la unidad).
+  aiContext    String?            @db.Text
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
   company      Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -232,9 +236,30 @@ model ProductUnit {
   media        ProductMedia[]
   publications Publication[]
   leads        Lead[]
+  mobileUploadSessions InventoryMobileUploadSession[]
 
   @@unique([companyId, number])
   @@index([companyId, status])
+}
+
+/// Enlace temporal firmado por token para subir fotos al inventario desde el móvil (sin sesión en el teléfono).
+model InventoryMobileUploadSession {
+  id        String    @id @default(cuid())
+  token     String    @unique
+  unitId    String
+  companyId String
+  userId    String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  unit    ProductUnit @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  company Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([unitId])
+  @@index([expiresAt])
+  @@map("inventory_mobile_upload_sessions")
 }
 
 model ProductSpec {

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import type { Session } from "next-auth";
 import { SessionProvider } from "next-auth/react";
 
 import { Toaster } from "@/components/ui/sonner";
@@ -25,7 +26,14 @@ export function useAppTheme() {
   return context;
 }
 
-export function AppProviders({ children }: { children: React.ReactNode }) {
+export function AppProviders({
+  children,
+  session,
+}: {
+  children: React.ReactNode;
+  /** Sesión del servidor: evita el primer fetch a /api/auth/session (menos “Failed to fetch” en dev lento). */
+  session?: Session | null;
+}) {
   const [theme, setThemeState] = React.useState<ThemeMode>("light");
 
   React.useEffect(() => {
@@ -45,7 +53,12 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <SessionProvider refetchOnWindowFocus={false} refetchWhenOffline={false}>
+    <SessionProvider
+      session={session ?? undefined}
+      refetchInterval={0}
+      refetchOnWindowFocus={false}
+      refetchWhenOffline={false}
+    >
       <ThemeContext.Provider value={{ theme, setTheme }}>
         <TooltipProvider>{children}</TooltipProvider>
         <Toaster richColors closeButton position="top-right" />

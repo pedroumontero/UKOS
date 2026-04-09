@@ -113,10 +113,18 @@ export async function runPublicationListingAnalysis(params: {
     throw new Error("No hay imagenes para analizar.");
   }
 
+  const costLow  = cost != null && Number.isFinite(cost) ? Math.round(cost * 1.15) : null;
+  const costMid  = cost != null && Number.isFinite(cost) ? Math.round(cost * 1.30) : null;
+  const costHigh = cost != null && Number.isFinite(cost) ? Math.round(cost * 1.50) : null;
+
   const costLine =
     cost != null && Number.isFinite(cost)
-      ? `Costo interno de la unidad (no mostrar al comprador): ${cost}. El precio sugerido BAJO debe ser ESTRICTAMENTE MAYOR que este costo (nunca igual ni menor). Deja margen comercial razonable.`
-      : "No se indico costo en inventario; propone precios coherentes con el mercado de reventa/refurb.";
+      ? `Costo interno (NO mostrar al comprador): ${cost}. POLITICA DE PRECIOS OPTIMISTA — obligatoria, prioriza ganancia sobre velocidad de venta: ` +
+        `priceLow minimo ${costLow} (~15% sobre costo, piso estrategico — no es precio de oferta); ` +
+        `priceMid minimo ${costMid} (~30% sobre costo, precio objetivo real); ` +
+        `priceHigh minimo ${costHigh} (~50% sobre costo, precio ambicioso de lista). ` +
+        `NUNCA sugerir precios cercanos al costo. El sistema rechazara automaticamente cualquier sugerencia inferior a estos pisos.`
+      : "No se indico costo; propone precios ALTOS coherentes con el mercado refurb USA. Sé optimista: prioriza margen alto sobre velocidad de venta.";
 
   const saleLine =
     salePrice != null && Number.isFinite(salePrice)
@@ -154,9 +162,9 @@ export async function runPublicationListingAnalysis(params: {
     `Rubro del negocio: ${industryType}. Referencia interna de unidad: ${unitNumber}.\n` +
     `${inventoryBlock}\n` +
     `${costLine} ${saleLine}\n` +
-    `Separador entre espanol e ingles: una sola linea con solo ---------- (obligatorio). Nunca uses la linea '🇺🇸 English' ni la palabra English sola como separador.\n` +
-    `Titulo: sin emojis bajo ningun concepto.\n` +
-    `Propone priceHigh, priceMid, priceLow (solo numeros en JSON). Orden: priceHigh >= priceMid >= priceLow.\n` +
+    `TITULO (listingTitle): estilo Facebook Marketplace — corto, claro y comercial. Ejemplos: "Dell Latitude 5420 i5 11th Gen 8GB RAM SSD Rapida Lista Para Usar" o "HP EliteBook 840 G8 Core i7 16GB RAM 512GB SSD Win11". Sin codigos internos, sin strings largos tipo inventario, sin texto frio.\n` +
+    `DESCRIPCION (listingDescription): comercial y persuasiva — resalta rapidez, disponibilidad inmediata y caso de uso. Separa ES e EN con la linea ---------- exactamente. Nunca uses '🇺🇸 English' como separador.\n` +
+    `PRECIOS: priceHigh, priceMid, priceLow en JSON numerico. Orden: priceHigh >= priceMid >= priceLow. Aplica pisos de margen indicados.\n` +
     `Responde SOLO JSON valido con estas claves exactas:\n${jsonKeys}`;
 
   const parts: OpenAI.Chat.ChatCompletionContentPart[] = [{ type: "text", text: textIntro }];
@@ -182,14 +190,15 @@ export async function runPublicationListingAnalysis(params: {
       {
         role: "system",
         content:
-          "Anuncios de tecnologia segunda mano/refurb para marketplaces en USA. " +
-          "listingTitle: NUNCA emojis ni pictogramas — solo texto. " +
-          "listingDescription: espanol completo, linea separadora exacta ---------- (10 guiones), linea en blanco, ingles completo. " +
-          "Nunca uses '🇺🇸 English' ni banderas como separador. Sin markdown (**). Texto plano. " +
-          "Emojis solo dentro del cuerpo de la descripcion (encabezados de seccion), nunca en el titulo. " +
-          "Evita slogans vacios ('Descubre', 'perfecto para tu espacio'). " +
-          "Nunca unknown. Precios numericos en JSON. Si hay costo, priceLow > costo. " +
-          "\\n\\n entre secciones en listingDescription.",
+          "Especialista en anuncios de tecnologia segunda mano/refurb para marketplaces en USA. " +
+          "MENTALIDAD: vendedor comercial y directo estilo Facebook Marketplace. Titulos cortos, densos y de impacto maximo. " +
+          "listingTitle: NUNCA emojis ni pictogramas — solo texto. Formato Marketplace: Marca Modelo CPU RAM SSD Estado (ejemplo: Dell Latitude 5420 i5 11th Gen 8GB RAM 256GB SSD Win11 Lista). " +
+          "listingDescription: tono persuasivo y humano — resalta beneficios reales: rapida, lista para trabajar, ideal para oficina/estudio/hogar. " +
+          "Estructura descripcion: (1) intro corta con beneficio clave; (2) especificaciones en lista; (3) condicion del equipo; (4) ideal para quien; (5) que incluye; (6) cierre con llamada a accion. " +
+          "Bilingue ES completo, luego ----------, luego EN completo. Sin markdown (**). Texto plano. " +
+          "PRECIOS OPTIMISTAS (critico): priceLow minimo 15% sobre costo, priceMid 28-30%, priceHigh 45-55%. Nunca acercarse al costo. " +
+          "Emojis solo en encabezados de seccion dentro del cuerpo, nunca en titulo. Evita frases vacias como 'Descubre', 'perfecto para tu espacio', 'combina rendimiento y diseno'. " +
+          "Nunca unknown. \\n\\n entre secciones.",
       },
       { role: "user", content: parts },
     ],

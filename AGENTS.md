@@ -23,6 +23,10 @@ Documento operativo permanente. El agente de asistencia al código debe cumplirl
 | Compose | `docker-compose.dev-remote.yml` |
 | Puerto en host | `3001` |
 
+**Salida HTTPS / OpenAI:** el servicio `app-dev` usa `dns: [1.1.1.1, 8.8.8.8]` y `NODE_OPTIONS=--dns-result-order=ipv4first`. Sin eso, en algunos hosts (p. ej. Tailscale + resolv del host) el contenedor puede devolver `EAI_AGAIN` al resolver `api.openai.com` y la IA de inventario muestra error de conexión. Tras cambiar el compose, recrear el contenedor (`docker compose ... up -d --force-recreate app-dev`).
+
+**Caddy + dev lento:** el `Caddyfile` en `tailscale/caddy/` fija para `dev-ukos.tech` timeouts largos (`read_timeout` / `write_timeout` 3m) hacia `127.0.0.1:3001`, porque la primera compilación de `next dev --webpack` puede tardar decenas de segundos y un proxy corto devuelve 502/504. Tras editar el Caddyfile en la VM, recargar Caddy (`caddy reload` o el script de despliegue que copia el archivo). El arranque de `app-dev` ejecuta `scripts/warm-next-dev.mjs` en segundo plano para precalentar rutas de Market Flow.
+
 ## Entorno PROD
 
 | Concepto | Valor |

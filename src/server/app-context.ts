@@ -1,8 +1,11 @@
 import { ModuleKey } from "@prisma/client";
+import { cache } from "react";
+
 import { requireSession } from "@/server/auth";
 import { db } from "@/server/db";
 
-export async function getAppContext() {
+/** Deduplicado con `layout` + `page` en la misma navegación (evita el doble bloque Prisma). */
+export const getAppContext = cache(async () => {
   const session = await requireSession();
   const companyId = session.user.activeCompanyId;
 
@@ -41,4 +44,4 @@ export async function getAppContext() {
     channels,
     marketFlowSettings,
   };
-}
+});

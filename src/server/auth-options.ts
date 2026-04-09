@@ -5,6 +5,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { db } from "@/server/db";
 
 export const authOptions: NextAuthOptions = {
+  // AUTH_TRUST_HOST=true en Docker/Caddy: next-auth v4 no tipa `trustHost` en AuthOptions; la env la usa el runtime.
   session: {
     strategy: "jwt",
   },

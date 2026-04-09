@@ -1,14 +1,25 @@
 "use client";
 
 import * as React from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Camera, ChevronDown, ChevronUp, ExternalLink, Loader2, PackagePlus, Search, Sparkles, Star, Trash2 } from "lucide-react";
+import {
+  Camera,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  Loader2,
+  PackagePlus,
+  Search,
+  Smartphone,
+  Sparkles,
+  Star,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { ChannelIndicators } from "@/components/channel-indicators";
-import { StatusBadge, productStatusOptions } from "@/components/status-badge";
+import { getProductUnitStatusLabel, StatusBadge, productStatusOptions } from "@/components/status-badge";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -26,9 +37,25 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Textarea } from "@/components/ui/textarea";
 import { analyzeInventoryProductPhotosAction } from "@/features/market-flow/inventory/ai-actions";
-import { createProductUnitAction, updateProductUnitAction } from "@/features/market-flow/inventory/actions";
+import {
+  createProductUnitAction,
+  deleteProductUnitAction,
+  updateProductUnitAction,
+} from "@/features/market-flow/inventory/actions";
+import { InventoryMediaThumbnail } from "@/features/market-flow/inventory/inventory-media-thumbnail";
+import { InventoryMobileUploadPanel } from "@/features/market-flow/inventory/inventory-mobile-upload-panel";
+import {
+  createInventoryMobileUploadSessionAction,
+  ensureDraftProductUnitForMobileUploadAction,
+  getInventoryUnitMediaSnapshotAction,
+  revokeInventoryMobileUploadSessionAction,
+  type MobileUploadSessionPayload,
+} from "@/features/market-flow/inventory/mobile-upload-actions";
+import { validateInventoryPhotoPayload } from "@/features/market-flow/inventory/upload-limits";
+import { titleForInventoryFormField } from "@/lib/inventory-product-constants";
 import {
   deleteProductMediaAction,
   reorderProductMediaAction,
@@ -54,12 +81,16 @@ type InventoryPageProps = {
   canCreate?: boolean;
   /** Si no puede editar, las filas son solo lectura. */
   canEdit?: boolean;
+  /** Eliminar unidades (permiso `market_flow.inventory.delete`). */
+  canDelete?: boolean;
 };
 
 type ProductOverlayProps = {
   mode: "create" | "edit";
   unit?: InventoryUnit;
   trigger?: React.ReactNode;
+  /** Permite generar enlace móvil (crear borrador + subir fotos). */
+  allowMobileUpload?: boolean;
 };
 
 function formatUtcDate(value: Date | string) {
@@ -85,7 +116,13 @@ function formatUtcDateTime(value: Date | string) {
 
 const VALID_STATUS = new Set<string>(statusTabs.map((tab) => tab.value));
 
-export function InventoryPage({ units, initialStatus, canCreate = true, canEdit = true }: InventoryPageProps) {
+export function InventoryPage({
+  units,
+  initialStatus,
+  canCreate = true,
+  canEdit = true,
+  canDelete = false,
+}: InventoryPageProps) {
   const [query, setQuery] = React.useState("");
   const [status, setStatus] = React.useState<(typeof statusTabs)[number]["value"]>(() => {
     if (initialStatus && initialStatus !== "all" && VALID_STATUS.has(initialStatus)) {
@@ -126,6 +163,7 @@ export function InventoryPage({ units, initialStatus, canCreate = true, canEdit 
             {canCreate ? (
               <ProductOverlay
                 mode="create"
+                allowMobileUpload={canCreate}
                 trigger={
                   <Button className="h-11 rounded-2xl px-5">
                     <PackagePlus className="size-4" />
@@ -149,14 +187,101 @@ export function InventoryPage({ units, initialStatus, canCreate = true, canEdit 
               </Button>
             ))}
           </div>
-          <ResponsiveInventory units={filteredUnits} canEdit={canEdit} />
+          <ResponsiveInventory units={filteredUnits} canEdit={canEdit} canDelete={canDelete} />
         </CardContent>
       </Card>
     </div>
   );
 }
 
-function ResponsiveInventory({ units, canEdit }: { units: InventoryUnit[]; canEdit: boolean }) {
+function DeleteUnitButton({
+  unit,
+  layout = "icon",
+}: {
+  unit: Pick<InventoryUnit, "id" | "number" | "title">;
+  layout?: "icon" | "bar";
+}) {
+  const [open, setOpen] = React.useState(false);
+  const [pending, startTransition] = React.useTransition();
+  const router = useRouter();
+
+  const handleDelete = () => {
+    startTransition(async () => {
+      const result = await deleteProductUnitAction(unit.id);
+      if (result.ok) {
+        toast.success("Producto eliminado");
+        setOpen(false);
+        router.refresh();
+      } else {
+        toast.error(result.error);
+      }
+    });
+  };
+
+  return (
+    <>
+      {layout === "icon" ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+          onClick={() => setOpen(true)}
+          aria-label={`Eliminar ${unit.number}`}
+        >
+          <Trash2 className="size-4" />
+        </Button>
+      ) : (
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full border-destructive/40 text-destructive hover:bg-destructive/10"
+          onClick={() => setOpen(true)}
+        >
+          <Trash2 className="mr-2 size-4 shrink-0" />
+          Eliminar producto
+        </Button>
+      )}
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          if (!next && pending) return;
+          setOpen(next);
+        }}
+      >
+        <DialogContent className="rounded-2xl sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Eliminar producto</DialogTitle>
+            <DialogDescription>
+              Vas a eliminar {unit.number} — {titleForInventoryFormField(unit.title) || "sin título"}. Se quitan las
+              fotos del servidor, publicaciones y datos
+              de la unidad. Los leads vinculados quedan sin unidad. Esta acción no se puede deshacer.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>
+              Cancelar
+            </Button>
+            <Button type="button" variant="destructive" onClick={handleDelete} disabled={pending}>
+              {pending ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+              Eliminar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function ResponsiveInventory({
+  units,
+  canEdit,
+  canDelete,
+}: {
+  units: InventoryUnit[];
+  canEdit: boolean;
+  canDelete: boolean;
+}) {
   const [isMobile, setIsMobile] = React.useState(false);
 
   React.useEffect(() => {
@@ -172,76 +297,82 @@ function ResponsiveInventory({ units, canEdit }: { units: InventoryUnit[]; canEd
   if (isMobile) {
     return (
       <div className="space-y-3">
-        {units.map((unit) =>
-          canEdit ? (
-            <ProductOverlay
-              key={unit.id}
-              mode="edit"
-              unit={unit}
-              trigger={
-                <button
-                  type="button"
-                  className="w-full rounded-[1.75rem] border border-border/60 bg-background/90 p-4 text-left shadow-sm transition hover:border-border hover:bg-accent/30"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">{unit.number}</p>
-                      <h3 className="mt-1 text-base font-semibold text-foreground">{unit.title}</h3>
+        {units.map((unit) => (
+          <div key={unit.id} className="space-y-2">
+            {canEdit ? (
+              <ProductOverlay
+                mode="edit"
+                unit={unit}
+                allowMobileUpload={canEdit}
+                trigger={
+                  <button
+                    type="button"
+                    className="w-full rounded-[1.75rem] border border-border/60 bg-background/90 p-4 text-left shadow-sm transition hover:border-border hover:bg-accent/30"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">{unit.number}</p>
+                        <h3 className="mt-1 line-clamp-2 text-base font-semibold text-foreground">
+                          {titleForInventoryFormField(unit.title) || unit.number}
+                        </h3>
+                      </div>
+                      <StatusBadge status={unit.status} />
                     </div>
-                    <StatusBadge status={unit.status} />
+                    <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                      <Meta label="Costo" value={unit.costAmount ? `$${unit.costAmount}` : "Pendiente"} />
+                      <Meta label="Precio" value={unit.salePrice ? `$${unit.salePrice}` : "Pendiente"} />
+                      <Meta label="Fecha" value={formatUtcDate(unit.registeredAt)} />
+                      <Meta
+                        label="Canales"
+                        value={`${unit.publications.filter((item) => item.status === "PUBLISHED").length}/${unit.publications.length}`}
+                      />
+                    </div>
+                    <div className="mt-4">
+                      <ChannelIndicators
+                        channels={unit.publications.map((publication) => ({
+                          name: publication.channel.displayName,
+                          code: publication.channel.code,
+                          status: publication.status,
+                        }))}
+                      />
+                    </div>
+                  </button>
+                }
+              />
+            ) : (
+              <div className="w-full rounded-[1.75rem] border border-border/60 bg-background/90 p-4 text-left shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">{unit.number}</p>
+                    <h3 className="mt-1 line-clamp-2 text-base font-semibold text-foreground">
+                      {titleForInventoryFormField(unit.title) || unit.number}
+                    </h3>
                   </div>
-                  <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                    <Meta label="Costo" value={unit.costAmount ? `$${unit.costAmount}` : "Pendiente"} />
-                    <Meta label="Precio" value={unit.salePrice ? `$${unit.salePrice}` : "Pendiente"} />
-                    <Meta label="Fecha" value={formatUtcDate(unit.registeredAt)} />
-                    <Meta
-                      label="Canales"
-                      value={`${unit.publications.filter((item) => item.status === "PUBLISHED").length}/${unit.publications.length}`}
-                    />
-                  </div>
-                  <div className="mt-4">
-                    <ChannelIndicators
-                      channels={unit.publications.map((publication) => ({
-                        name: publication.channel.displayName,
-                        status: publication.status,
-                      }))}
-                    />
-                  </div>
-                </button>
-              }
-            />
-          ) : (
-            <div
-              key={unit.id}
-              className="w-full rounded-[1.75rem] border border-border/60 bg-background/90 p-4 text-left shadow-sm"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">{unit.number}</p>
-                  <h3 className="mt-1 text-base font-semibold text-foreground">{unit.title}</h3>
+                  <StatusBadge status={unit.status} />
                 </div>
-                <StatusBadge status={unit.status} />
+                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                  <Meta label="Costo" value={unit.costAmount ? `$${unit.costAmount}` : "Pendiente"} />
+                  <Meta label="Precio" value={unit.salePrice ? `$${unit.salePrice}` : "Pendiente"} />
+                  <Meta label="Fecha" value={formatUtcDate(unit.registeredAt)} />
+                  <Meta
+                    label="Canales"
+                    value={`${unit.publications.filter((item) => item.status === "PUBLISHED").length}/${unit.publications.length}`}
+                  />
+                </div>
+                <div className="mt-4">
+                  <ChannelIndicators
+                    channels={unit.publications.map((publication) => ({
+                      name: publication.channel.displayName,
+                      code: publication.channel.code,
+                      status: publication.status,
+                    }))}
+                  />
+                </div>
               </div>
-              <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                <Meta label="Costo" value={unit.costAmount ? `$${unit.costAmount}` : "Pendiente"} />
-                <Meta label="Precio" value={unit.salePrice ? `$${unit.salePrice}` : "Pendiente"} />
-                <Meta label="Fecha" value={formatUtcDate(unit.registeredAt)} />
-                <Meta
-                  label="Canales"
-                  value={`${unit.publications.filter((item) => item.status === "PUBLISHED").length}/${unit.publications.length}`}
-                />
-              </div>
-              <div className="mt-4">
-                <ChannelIndicators
-                  channels={unit.publications.map((publication) => ({
-                    name: publication.channel.displayName,
-                    status: publication.status,
-                  }))}
-                />
-              </div>
-            </div>
-          ),
-        )}
+            )}
+            {canDelete ? <DeleteUnitButton unit={unit} layout="bar" /> : null}
+          </div>
+        ))}
         {!units.length ? <EmptyInventory /> : null}
       </div>
     );
@@ -249,7 +380,17 @@ function ResponsiveInventory({ units, canEdit }: { units: InventoryUnit[]; canEd
 
   return (
     <div className="overflow-hidden rounded-[1.5rem] border border-border/60 bg-background/90">
-      <Table>
+      <Table className="table-fixed">
+        <colgroup>
+          <col className="w-[7.5rem]" />
+          <col className="w-[min(32rem,42vw)]" />
+          <col className="w-[9rem]" />
+          <col className="w-[7.5rem]" />
+          <col className="w-[9rem]" />
+          <col className="w-[9.5rem]" />
+          <col className="w-[8rem]" />
+          {canDelete ? <col className="w-[4.5rem]" /> : null}
+        </colgroup>
         <TableHeader>
           <TableRow>
             <TableHead>Numero</TableHead>
@@ -259,31 +400,39 @@ function ResponsiveInventory({ units, canEdit }: { units: InventoryUnit[]; canEd
             <TableHead>Precio De Venta</TableHead>
             <TableHead>Fecha De Registro</TableHead>
             <TableHead>Canales</TableHead>
+            {canDelete ? <TableHead className="w-[4.5rem] text-right">Acciones</TableHead> : null}
           </TableRow>
         </TableHeader>
         <TableBody>
           {units.map((unit) => (
             <TableRow key={unit.id}>
               <TableCell className="font-medium text-foreground">{unit.number}</TableCell>
-              <TableCell>
+              <TableCell className="min-w-0 pr-3">
                 {canEdit ? (
                   <ProductOverlay
                     mode="edit"
                     unit={unit}
+                    allowMobileUpload={canEdit}
                     trigger={
-                      <button type="button" className="text-left transition hover:text-primary">
-                        <p className="font-semibold text-foreground">{unit.title}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {[unit.brand, unit.model].filter(Boolean).join(" / ") || "Unidad En Captura"}
+                      <button type="button" className="w-full min-w-0 text-left transition hover:text-primary">
+                        <TruncatedTextWithTooltip
+                          text={titleForInventoryFormField(unit.title) || unit.number}
+                          className="font-semibold text-foreground"
+                        />
+                        <p className="truncate text-sm text-muted-foreground">
+                          {[unit.brand, unit.model].filter(Boolean).join(" / ") || "—"}
                         </p>
                       </button>
                     }
                   />
                 ) : (
-                  <div className="text-left">
-                    <p className="font-semibold text-foreground">{unit.title}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {[unit.brand, unit.model].filter(Boolean).join(" / ") || "Unidad En Captura"}
+                  <div className="min-w-0 text-left">
+                    <TruncatedTextWithTooltip
+                      text={titleForInventoryFormField(unit.title) || unit.number}
+                      className="font-semibold text-foreground"
+                    />
+                    <p className="truncate text-sm text-muted-foreground">
+                      {[unit.brand, unit.model].filter(Boolean).join(" / ") || "—"}
                     </p>
                   </div>
                 )}
@@ -296,15 +445,21 @@ function ResponsiveInventory({ units, canEdit }: { units: InventoryUnit[]; canEd
                 <ChannelIndicators
                   channels={unit.publications.map((publication) => ({
                     name: publication.channel.displayName,
+                    code: publication.channel.code,
                     status: publication.status,
                   }))}
                 />
               </TableCell>
+              {canDelete ? (
+                <TableCell className="text-right">
+                  <DeleteUnitButton unit={unit} />
+                </TableCell>
+              ) : null}
             </TableRow>
           ))}
           {!units.length ? (
             <TableRow>
-              <TableCell colSpan={7}>
+              <TableCell colSpan={canDelete ? 8 : 7}>
                 <EmptyInventory />
               </TableCell>
             </TableRow>
@@ -315,32 +470,52 @@ function ResponsiveInventory({ units, canEdit }: { units: InventoryUnit[]; canEd
   );
 }
 
-function ProductOverlay({ mode, unit, trigger }: ProductOverlayProps) {
+function ProductOverlay({ mode, unit, trigger, allowMobileUpload = true }: ProductOverlayProps) {
   const [open, setOpen] = React.useState(false);
+  const [sessionKey, setSessionKey] = React.useState(0);
 
-  const content = (
-    <ProductOverlayContent
-      mode={mode}
-      unit={unit}
-      dialogOpen={open}
-      onDone={() => {
-        setOpen(false);
-      }}
-    />
-  );
+  const handleOpenChange = React.useCallback((next: boolean) => {
+    if (next) {
+      setSessionKey((k) => k + 1);
+    }
+    setOpen(next);
+  }, []);
 
   return (
     <>
-      <span onClick={() => setOpen(true)}>{trigger ?? <Button>Nuevo Producto</Button>}</span>
-      <Dialog open={open} onOpenChange={setOpen}>
+      <span className="inline-flex" onClick={() => handleOpenChange(true)}>
+        {trigger ?? <Button>Nuevo Producto</Button>}
+      </span>
+      <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="flex h-[94vh] w-[min(1120px,calc(100vw-1rem))] max-w-none flex-col rounded-[1.75rem] border-border/60 bg-background p-0 sm:h-[92vh] sm:w-[min(1100px,calc(100vw-2rem))] sm:rounded-[2rem]">
         <DialogHeader className="border-b border-border/60 px-4 py-4 text-left sm:px-8 sm:py-6">
-          <DialogTitle className="text-2xl">{mode === "create" ? "Nuevo Producto" : unit?.title}</DialogTitle>
-          <DialogDescription>
-            Captura y mantenimiento de la unidad fisica: fotos, datos, costos y estado por canal.
+          <DialogTitle className="text-2xl">
+            {mode === "create"
+              ? "Nuevo producto"
+              : titleForInventoryFormField(unit?.title) || unit?.number || "Unidad"}
+          </DialogTitle>
+          <DialogDescription className="space-y-2">
+            <span>
+              Fotos, ficha técnica, costos y estado por canal. Los cambios se guardan al confirmar.
+            </span>
+            <span className="block text-xs text-muted-foreground">
+              Con «Guardar cambios» o «Guardar producto», el estado se ajusta solo según los datos: borrador sin
+              título, recibido con título incompleto, por publicar cuando están llenos los campos clave.
+            </span>
           </DialogDescription>
         </DialogHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-8 sm:py-6">{content}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-8 sm:py-6">
+          <ProductOverlayContent
+            key={sessionKey}
+            mode={mode}
+            unit={unit}
+            allowMobileUpload={allowMobileUpload}
+            dialogOpen={open}
+            onDone={() => {
+              setOpen(false);
+            }}
+          />
+        </div>
       </DialogContent>
     </Dialog>
     </>
@@ -350,11 +525,13 @@ function ProductOverlay({ mode, unit, trigger }: ProductOverlayProps) {
 function ProductOverlayContent({
   mode,
   unit,
+  allowMobileUpload,
   dialogOpen,
   onDone,
 }: {
   mode: "create" | "edit";
   unit?: InventoryUnit;
+  allowMobileUpload: boolean;
   dialogOpen: boolean;
   onDone: () => void;
 }) {
@@ -362,17 +539,87 @@ function ProductOverlayContent({
   const [pending, startTransition] = React.useTransition();
   const [aiPending, startAiTransition] = React.useTransition();
   const [files, setFiles] = React.useState<File[]>([]);
+  const [provisionalUnit, setProvisionalUnit] = React.useState<InventoryUnit | null>(null);
+  const [mobileUploadOpen, setMobileUploadOpen] = React.useState(false);
+  const [mobileSession, setMobileSession] = React.useState<MobileUploadSessionPayload | null>(null);
+  const [liveServerMedia, setLiveServerMedia] = React.useState<InventoryUnit["media"] | null>(null);
+  const [mobileBusy, setMobileBusy] = React.useState(false);
+
+  const effectiveUnit = unit ?? provisionalUnit;
+
   const [status, setStatus] = React.useState(unit?.status ?? "DRAFT");
-  const [draftRestored, setDraftRestored] = React.useState(false);
-  const [aiContext, setAiContext] = React.useState("");
+  const [aiContext, setAiContext] = React.useState(unit?.aiContext ?? "");
   const [accordionOpen, setAccordionOpen] = React.useState<string[]>([]);
-  const [autosaveLabel, setAutosaveLabel] = React.useState<string | null>(null);
-  const autosaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const formRef = React.useRef<HTMLFormElement>(null);
   const storageKey = React.useMemo(
-    () => `market-flow-product-draft:${mode}:${unit?.id ?? "new"}`,
-    [mode, unit?.id],
+    () =>
+      `market-flow-product-draft:${effectiveUnit?.id ? "edit" : mode}:${effectiveUnit?.id ?? "new"}`,
+    [mode, effectiveUnit?.id],
   );
+
+  React.useEffect(() => {
+    if (!provisionalUnit?.id) return;
+    setStatus(provisionalUnit.status);
+  }, [provisionalUnit?.id, provisionalUnit?.status]);
+
+  const handleMediaSynced = React.useCallback((media: InventoryUnit["media"]) => {
+    setLiveServerMedia(media);
+  }, []);
+
+  const dismissMobileUpload = React.useCallback(async () => {
+    const unitId = effectiveUnit?.id;
+    if (mobileSession) {
+      try {
+        await revokeInventoryMobileUploadSessionAction(mobileSession.sessionId);
+      } catch {
+        /* enlace expira solo */
+      }
+    }
+    setMobileUploadOpen(false);
+    setMobileSession(null);
+    // No borrar liveServerMedia en frío: en modo "nuevo producto" `provisionalUnit` no trae medios
+    // actualizados del servidor; al cerrar el panel las fotos solo vivían en liveServerMedia.
+    if (unitId) {
+      try {
+        const snap = await getInventoryUnitMediaSnapshotAction(unitId);
+        if (snap.ok) {
+          setLiveServerMedia(snap.media);
+        }
+      } catch {
+        /* mantener último liveServerMedia si el snapshot falla */
+      }
+    }
+    router.refresh();
+  }, [mobileSession, router, effectiveUnit?.id]);
+
+  const startMobileUpload = React.useCallback(async () => {
+    if (!allowMobileUpload || mobileBusy) return;
+    setMobileBusy(true);
+    setMobileSession(null);
+    try {
+      let targetId = effectiveUnit?.id;
+      if (!targetId) {
+        const draft = await ensureDraftProductUnitForMobileUploadAction();
+        if (!draft.ok) {
+          toast.error(draft.error);
+          return;
+        }
+        setProvisionalUnit(draft.unit);
+        targetId = draft.unit.id;
+        router.refresh();
+      }
+
+      const sess = await createInventoryMobileUploadSessionAction(targetId);
+      if (!sess.ok) {
+        toast.error(sess.error);
+        return;
+      }
+      setMobileSession(sess.data);
+      setMobileUploadOpen(true);
+    } finally {
+      setMobileBusy(false);
+    }
+  }, [allowMobileUpload, mobileBusy, effectiveUnit?.id, router]);
 
   React.useEffect(() => {
     if (!dialogOpen) {
@@ -407,13 +654,6 @@ function ProductOverlayContent({
         updatedAt: new Date().toISOString(),
       }),
     );
-
-    if (autosaveTimerRef.current) {
-      clearTimeout(autosaveTimerRef.current);
-    }
-    autosaveTimerRef.current = setTimeout(() => {
-      setAutosaveLabel("Guardado automáticamente");
-    }, 400);
   }, [status, storageKey, aiContext]);
 
   React.useEffect(() => {
@@ -450,8 +690,6 @@ function ProductOverlayContent({
       if (parsed.status) {
         setStatus(parsed.status as typeof status);
       }
-
-      setDraftRestored(true);
     } catch {
       window.localStorage.removeItem(storageKey);
     }
@@ -465,26 +703,29 @@ function ProductOverlayContent({
   const submit = (intent: "save-draft" | "save-product") => {
     if (!formRef.current) return;
 
-    const maxTotalBytes = 14 * 1024 * 1024;
-    const photoBytes = files.reduce((sum, file) => sum + file.size, 0);
-    if (photoBytes > maxTotalBytes) {
-      toast.error(
-        "Las fotos superan el tamaño máximo permitido (14 MB en total). Reduce el número de imágenes o comprímelas e inténtalo de nuevo.",
-      );
+    const photoLimitError = validateInventoryPhotoPayload(files);
+    if (photoLimitError) {
+      toast.error(photoLimitError);
       return;
     }
 
     const formData = new FormData(formRef.current);
     formData.set("intent", intent);
     formData.set("status", status);
+    formData.set("aiContext", aiContext);
     files.forEach((file) => formData.append("photos", file));
-    if (mode === "edit" && unit) {
-      formData.set("unitId", unit.id);
+
+    const useUpdatePath = Boolean(effectiveUnit?.id) && (mode === "edit" || provisionalUnit !== null);
+    if (useUpdatePath && effectiveUnit) {
+      formData.set("unitId", effectiveUnit.id);
     }
 
     startTransition(async () => {
       try {
-        const result = mode === "create" ? await createProductUnitAction(formData) : await updateProductUnitAction(formData);
+        const result =
+          useUpdatePath && effectiveUnit
+            ? await updateProductUnitAction(formData)
+            : await createProductUnitAction(formData);
 
         if (!result.ok) {
           toast.error(result.error || "No fue posible guardar el producto.");
@@ -492,14 +733,11 @@ function ProductOverlayContent({
         }
 
         window.localStorage.removeItem(storageKey);
-        setAutosaveLabel(null);
-        toast.success(mode === "create" ? "Producto guardado correctamente." : "Producto actualizado correctamente.");
+        toast.success(useUpdatePath ? "Cambios guardados." : "Producto guardado.");
         onDone();
         router.refresh();
       } catch {
-        toast.error(
-          "No fue posible guardar el producto. Si subiste fotos muy grandes, prueba con imágenes más pequeñas o menos archivos.",
-        );
+        toast.error("No fue posible guardar el producto. Verifica tu conexión e inténtalo de nuevo.");
       }
     });
   };
@@ -521,17 +759,18 @@ function ProductOverlayContent({
   };
 
   const moveServerMedia = (orderedIds: string[], message: string) => {
-    if (!unit) return;
+    if (!effectiveUnit) return;
     const formData = new FormData();
-    formData.set("unitId", unit.id);
+    formData.set("unitId", effectiveUnit.id);
     formData.set("orderedIds", orderedIds.join(","));
     runMediaAction(() => reorderProductMediaAction(formData), message);
   };
 
   const sortedServerMedia = React.useMemo(() => {
-    if (!unit?.media.length) return [];
-    return [...unit.media].sort((a, b) => a.sortOrder - b.sortOrder);
-  }, [unit]);
+    const source = liveServerMedia ?? effectiveUnit?.media;
+    if (!source?.length) return [];
+    return [...source].sort((a, b) => a.sortOrder - b.sortOrder);
+  }, [liveServerMedia, effectiveUnit?.media]);
 
   const hasPhotosForAi = files.length > 0 || sortedServerMedia.length > 0;
 
@@ -575,8 +814,8 @@ function ProductOverlayContent({
   const runAiFill = () => {
     startAiTransition(async () => {
       const formData = new FormData();
-      if (mode === "edit" && unit?.id) {
-        formData.set("unitId", unit.id);
+      if (effectiveUnit?.id) {
+        formData.set("unitId", effectiveUnit.id);
       }
       files.forEach((file) => formData.append("images", file));
 
@@ -605,50 +844,67 @@ function ProductOverlayContent({
       applyVisionToForm(result.data);
       setAccordionOpen([...INVENTORY_MODAL_ACCORDION_KEYS]);
       persistDraft();
-      toast.success("Sugerencias de IA aplicadas en campos vacíos. Revisa y ajusta antes de guardar.");
+      toast.success("IA aplicada en campos vacíos. Revisa antes de guardar.");
     });
   };
 
   return (
     <form ref={formRef} className="space-y-6 pb-4" onChangeCapture={persistDraft} onBlurCapture={persistDraft}>
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-        {autosaveLabel ? <p className="text-xs text-muted-foreground">{autosaveLabel}</p> : <span />}
-        {draftRestored ? (
-          <p className="text-xs text-amber-700 dark:text-amber-400">
-            Borrador local recuperado. Si faltan fotos en pantalla, vuelve a seleccionarlas antes de guardar.
-          </p>
-        ) : null}
-      </div>
       <div className="grid gap-4 2xl:grid-cols-[1.1fr_0.9fr]">
         <Card className="rounded-[1.75rem] border-border/60 bg-card/90 shadow-sm">
           <CardHeader>
             <CardTitle className="text-lg">Fotos</CardTitle>
             <CardDescription>
-              Sube imagenes reales de la unidad. Puedes ordenarlas, marcar la principal y eliminar las que no sirvan.
+              Imágenes de la unidad. Orden, foto principal y borrado desde cada miniatura.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {allowMobileUpload ? (
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-muted-foreground">
+                  Usa la cámara del teléfono sin cable: enlace seguro de un solo uso con QR.
+                </p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="h-11 shrink-0 gap-2 rounded-2xl"
+                  disabled={pending || mobileBusy}
+                  onClick={() => void startMobileUpload()}
+                >
+                  {mobileBusy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Smartphone className="size-4" aria-hidden />}
+                  Subir desde mi teléfono
+                </Button>
+              </div>
+            ) : null}
             <label className="flex min-h-44 cursor-pointer flex-col items-center justify-center rounded-[1.5rem] border border-dashed border-border/80 bg-background/60 p-6 text-center transition hover:bg-accent/30">
               <Camera className="mb-3 size-8 text-muted-foreground" />
-              <span className="text-sm font-medium text-foreground">Subir fotos</span>
-              <span className="mt-1 text-sm text-muted-foreground">
-                Minimo una foto para salir del borrador. Puedes anadir mas despues de guardar.
+              <span className="text-sm font-medium text-foreground">Añadir fotos</span>
+              <span className="mt-1 max-w-sm text-sm text-muted-foreground">
+                {
+                  "Al confirmar el producto con fotos, la unidad pasa a recibida. Puedes elegir varias a la vez o ir añadiendo de una en una; en iPhone cada nueva foto se suma a la lista."
+                }
               </span>
               <input
                 className="hidden"
                 type="file"
                 accept="image/*"
                 multiple
-                onChange={(event) => setFiles(Array.from(event.target.files ?? []))}
+                onChange={(event) => {
+                  const input = event.currentTarget;
+                  // Hay que copiar los File antes de vaciar el input: al poner value="" muchos navegadores vacían el FileList.
+                  const picked = Array.from(input.files ?? []);
+                  // Sin vaciar el input, iOS Safari a veces no vuelve a disparar onChange en la siguiente foto.
+                  input.value = "";
+                  if (!picked.length) return;
+                  setFiles((prev) => [...prev, ...picked]);
+                }}
               />
             </label>
             {photoPreviews.length ? (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {photoPreviews.map((photo, index) => (
                   <div key={photo.url} className="space-y-2 rounded-2xl border border-border/60 bg-muted/40 p-2">
-                    <div className="overflow-hidden rounded-xl">
-                      <Image src={photo.url} alt={photo.name} width={320} height={112} unoptimized className="h-28 w-full object-cover" />
-                    </div>
+                    <InventoryMediaThumbnail src={photo.url} alt={photo.name} />
                     <p className="truncate px-1 text-xs text-muted-foreground">{photo.name}</p>
                     <div className="flex flex-wrap gap-1">
                       <Button
@@ -702,7 +958,7 @@ function ProductOverlayContent({
                 ))}
               </div>
             ) : null}
-            {unit && sortedServerMedia.length ? (
+            {effectiveUnit && sortedServerMedia.length ? (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {sortedServerMedia.map((photo, index) => (
                   <div
@@ -712,9 +968,7 @@ function ProductOverlayContent({
                       photo.isPrimary ? "border-primary ring-1 ring-primary/40" : "border-border/60 bg-muted/40",
                     )}
                   >
-                    <div className="overflow-hidden rounded-xl">
-                      <Image src={photo.fileUrl} alt={photo.fileName} width={320} height={112} unoptimized className="h-28 w-full object-cover" />
-                    </div>
+                    <InventoryMediaThumbnail src={photo.fileUrl} alt={photo.fileName} />
                     <div className="flex flex-wrap gap-1">
                       <Button
                         type="button"
@@ -762,7 +1016,7 @@ function ProductOverlayContent({
                         disabled={pending || photo.isPrimary}
                         onClick={() => {
                           const formData = new FormData();
-                          formData.set("unitId", unit.id);
+                          formData.set("unitId", effectiveUnit.id);
                           formData.set("mediaId", photo.id);
                           runMediaAction(() => setPrimaryProductMediaAction(formData), "Foto principal actualizada.");
                         }}
@@ -777,7 +1031,7 @@ function ProductOverlayContent({
                         disabled={pending}
                         onClick={() => {
                           const formData = new FormData();
-                          formData.set("unitId", unit.id);
+                          formData.set("unitId", effectiveUnit.id);
                           formData.set("mediaId", photo.id);
                           runMediaAction(() => deleteProductMediaAction(formData), "Foto eliminada.");
                         }}
@@ -796,25 +1050,24 @@ function ProductOverlayContent({
           <CardHeader>
             <CardTitle className="text-lg">Asistente de IA</CardTitle>
             <CardDescription>
-              OpenAI analiza las fotos y el contexto que indiques. La clave y el modelo están en Configuraciones del Market Flow.
+              Usa tu clave y modelo en Market Flow → Configuración. Hasta 4 imágenes por análisis.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="ukos-ai-context" className="text-sm font-medium text-foreground">
-                Contexto adicional para la IA
+                Contexto para la IA
               </Label>
               <Textarea
                 id="ukos-ai-context"
                 value={aiContext}
                 onChange={(e) => setAiContext(e.target.value)}
-                placeholder="Ej. Dell Latitude 5420, i5 10.ª gen, 16 GB RAM, sin cargador, teclado en inglés…"
                 rows={4}
                 className="min-h-[5.5rem] resize-y rounded-2xl text-sm"
                 disabled={pending || aiPending}
               />
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                Escribe lo que ya sepas del producto: marca, modelo, estado, accesorios o limitaciones. La IA lo combina con la imagen y con lo que ya tengas en el formulario para sugerir mejores títulos y campos.
+              <p className="text-xs text-muted-foreground">
+                Lo que escribas aquí se guarda con la unidad y ayuda a acertar título y especificaciones.
               </p>
             </div>
             <Button
@@ -825,10 +1078,10 @@ function ProductOverlayContent({
               onClick={runAiFill}
             >
               {aiPending ? <Loader2 className="size-5 animate-spin" aria-hidden /> : <Sparkles className="size-5" aria-hidden />}
-              {aiPending ? "Analizando con IA…" : "Rellenar con IA"}
+              {aiPending ? "Analizando…" : "Rellenar con IA"}
             </Button>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              Hasta 4 imágenes (nuevas o ya guardadas en esta unidad). Solo completa campos vacíos; no borra lo que escribiste. Si la API falla, revisa integraciones.
+            <p className="text-xs text-muted-foreground">
+              Solo rellena campos vacíos. Revisa integraciones si la API falla.
             </p>
           </CardContent>
         </Card>
@@ -843,12 +1096,16 @@ function ProductOverlayContent({
       >
         <OverlayAccordion value="general" title="General">
           <div className="grid gap-4 md:grid-cols-2">
-            <Field label="Titulo Del Producto" name="title" defaultValue={unit?.title ?? ""} placeholder="Ej. Dell Latitude 5420 16GB / 512GB" />
+            <Field label="Título" name="title" defaultValue={titleForInventoryFormField(effectiveUnit?.title)} />
             <div className="space-y-2">
-              <Label>Estado Visible</Label>
+              <Label>Estado</Label>
+              <p className="text-xs text-muted-foreground">
+                En «Guardar borrador» eliges el estado manualmente. En «Guardar cambios» / «Guardar producto» se
+                recalcula según título y campos obligatorios.
+              </p>
               <Select value={status} onValueChange={(value) => setStatus(value as typeof status)}>
-                <SelectTrigger className="h-11 rounded-2xl">
-                  <SelectValue placeholder="Selecciona Estado" />
+                <SelectTrigger className="h-11 w-full min-w-0 rounded-2xl">
+                  <SelectValue>{(value) => getProductUnitStatusLabel(value)}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {productStatusOptions.map((option) => (
@@ -857,44 +1114,44 @@ function ProductOverlayContent({
                 </SelectContent>
               </Select>
             </div>
-            <Field label="Marca" name="brand" defaultValue={unit?.brand ?? ""} placeholder="Dell" />
-            <Field label="Modelo" name="model" defaultValue={unit?.model ?? ""} placeholder="Latitude 5420" />
-            <Field label="Categoria" name="category" defaultValue={unit?.category ?? ""} placeholder="Laptop" />
-            <Field label="Condicion" name="condition" defaultValue={unit?.condition ?? ""} placeholder="Muy Buena" />
+            <Field label="Marca" name="brand" defaultValue={effectiveUnit?.brand ?? ""} />
+            <Field label="Modelo" name="model" defaultValue={effectiveUnit?.model ?? ""} />
+            <Field label="Categoría" name="category" defaultValue={effectiveUnit?.category ?? ""} />
+            <Field label="Condición" name="condition" defaultValue={effectiveUnit?.condition ?? ""} />
             <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="notes">Notas</Label>
-              <Textarea id="notes" name="notes" defaultValue={unit?.notes ?? ""} placeholder="Observaciones operativas, upgrades o detalles importantes." className="min-h-28 rounded-2xl" />
+              <Label htmlFor="notes">Notas internas</Label>
+              <Textarea id="notes" name="notes" defaultValue={effectiveUnit?.notes ?? ""} className="min-h-28 rounded-2xl" />
             </div>
           </div>
         </OverlayAccordion>
 
         <OverlayAccordion value="specs" title="Especificaciones">
           <div className="grid gap-4 md:grid-cols-2">
-            <Field label="Tipo De Equipo" name="deviceType" defaultValue={getSpecValue(unit, "Tipo De Equipo")} placeholder="Laptop" />
-            <Field label="RAM" name="ram" defaultValue={getSpecValue(unit, "RAM")} placeholder="16GB" />
-            <Field label="SSD" name="ssd" defaultValue={getSpecValue(unit, "SSD")} placeholder="512GB" />
-            <Field label="CPU" name="cpu" defaultValue={getSpecValue(unit, "CPU")} placeholder="Intel Core i5" />
-            <Field label="Color" name="color" defaultValue={getSpecValue(unit, "Color")} placeholder="Gris espacial" />
+            <Field label="Tipo de equipo" name="deviceType" defaultValue={getSpecValue(effectiveUnit, "Tipo De Equipo")} />
+            <Field label="RAM" name="ram" defaultValue={getSpecValue(effectiveUnit, "RAM")} />
+            <Field label="SSD" name="ssd" defaultValue={getSpecValue(effectiveUnit, "SSD")} />
+            <Field label="CPU" name="cpu" defaultValue={getSpecValue(effectiveUnit, "CPU")} />
+            <Field label="Color" name="color" defaultValue={getSpecValue(effectiveUnit, "Color")} />
           </div>
         </OverlayAccordion>
 
         <OverlayAccordion value="costs" title="Costos">
           <div className="grid gap-4 md:grid-cols-2">
-            <Field label="Costo" name="costAmount" defaultValue={unit?.costAmount ?? ""} placeholder="320.00" type="number" />
-            <Field label="Precio De Venta" name="salePrice" defaultValue={unit?.salePrice ?? ""} placeholder="480.00" type="number" />
+            <Field label="Costo" name="costAmount" defaultValue={effectiveUnit?.costAmount ?? ""} type="number" />
+            <Field label="Precio de venta" name="salePrice" defaultValue={effectiveUnit?.salePrice ?? ""} type="number" />
           </div>
         </OverlayAccordion>
 
         <OverlayAccordion value="publications" title="Publicaciones">
           <div className="space-y-3">
-            {!unit?.publications.length && mode === "create" ? (
+            {!effectiveUnit?.publications.length && mode === "create" ? (
               <p className="text-sm text-muted-foreground">
-                Al guardar el producto se crean las filas por cada canal activo de la empresa.
+                Al guardar se generan las publicaciones pendientes por cada canal activo.
               </p>
             ) : null}
-            {unit?.publications.length ? (
+            {effectiveUnit?.publications.length ? (
               <div className="grid gap-3 md:grid-cols-2">
-                {unit.publications.map((publication) => {
+                {effectiveUnit.publications.map((publication) => {
                   const isPublished = publication.status === "PUBLISHED";
                   return (
                     <div
@@ -918,16 +1175,22 @@ function ProductOverlayContent({
                           {isPublished && publication.publishedPrice ? (
                             <p className="text-sm font-medium text-foreground">Precio publicado: ${publication.publishedPrice}</p>
                           ) : null}
+                          {isPublished && publication.publishedAt ? (
+                            <p className="text-xs text-muted-foreground">
+                              Fecha: {formatUtcDateTime(publication.publishedAt)}
+                            </p>
+                          ) : null}
                         </div>
                         <div className="flex flex-col gap-2">
-                          {!isPublished ? (
-                            <Link
-                              href={`/market-flow/publicar?canal=${publication.channel.id}`}
-                              className={cn(buttonVariants({ variant: "secondary" }), "rounded-xl")}
-                            >
-                              Ir a publicar
-                            </Link>
-                          ) : null}
+                          <Link
+                            href={`/market-flow/publicar?publicacion=${publication.id}`}
+                            className={cn(
+                              buttonVariants({ variant: isPublished ? "outline" : "secondary" }),
+                              "rounded-xl",
+                            )}
+                          >
+                            {isPublished ? "Gestionar publicación" : "Ir a publicar"}
+                          </Link>
                           {isPublished && publication.externalUrl ? (
                             <a
                               href={publication.externalUrl}
@@ -951,8 +1214,8 @@ function ProductOverlayContent({
 
         <OverlayAccordion value="activity" title="Actividad">
           <div className="space-y-3">
-            {(unit?.activities ?? []).length ? (
-              unit?.activities.map((activity) => (
+            {(effectiveUnit?.activities ?? []).length ? (
+              effectiveUnit?.activities.map((activity) => (
                 <div key={activity.id} className="rounded-2xl border border-border/60 bg-background/80 p-4">
                   <p className="font-medium text-foreground">{activity.label}</p>
                   <p className="text-sm text-muted-foreground">{formatUtcDateTime(activity.createdAt)}</p>
@@ -960,7 +1223,7 @@ function ProductOverlayContent({
               ))
             ) : (
               <div className="rounded-2xl border border-dashed border-border/60 bg-background/80 p-4 text-sm text-muted-foreground">
-                Aun no hay movimientos registrados para esta unidad.
+                Aún no hay movimientos registrados para esta unidad.
               </div>
             )}
           </div>
@@ -968,8 +1231,8 @@ function ProductOverlayContent({
 
         <OverlayAccordion value="leads" title="Leads">
           <div className="space-y-3">
-            {(unit?.leads ?? []).length ? (
-              unit?.leads.map((lead) => (
+            {(effectiveUnit?.leads ?? []).length ? (
+              effectiveUnit?.leads.map((lead) => (
                 <div key={lead.id} className="rounded-2xl border border-border/60 bg-background/80 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
@@ -977,7 +1240,7 @@ function ProductOverlayContent({
                       <p className="text-sm text-muted-foreground">Lead vinculado a esta unidad</p>
                     </div>
                     <Badge variant={lead.hasActiveConversation ? "default" : "outline"}>
-                      {lead.hasActiveConversation ? "Conversacion Activa" : "Sin Actividad"}
+                      {lead.hasActiveConversation ? "Conversación activa" : "Sin actividad"}
                     </Badge>
                   </div>
                 </div>
@@ -995,12 +1258,22 @@ function ProductOverlayContent({
 
       <div className={cn("sticky bottom-0 z-10 flex flex-col gap-3 border-t border-border/60 bg-background/95 py-3 backdrop-blur lg:flex-row lg:justify-end")}>
         <Button type="button" variant="outline" className="h-12 rounded-2xl" disabled={pending} onClick={() => submit("save-draft")}>
-          Guardar Borrador
+          Guardar borrador
         </Button>
         <Button type="button" className="h-12 rounded-2xl px-6 text-base" disabled={pending} onClick={() => submit("save-product")}>
-          {mode === "create" ? "Guardar Producto" : "Guardar Cambios"}
+          {mode === "create" ? "Guardar producto" : "Guardar cambios"}
         </Button>
       </div>
+
+      {effectiveUnit?.id ? (
+        <InventoryMobileUploadPanel
+          open={mobileUploadOpen}
+          onDismiss={dismissMobileUpload}
+          session={mobileSession}
+          unitId={effectiveUnit.id}
+          onMediaSynced={handleMediaSynced}
+        />
+      ) : null}
     </form>
   );
 }
@@ -1032,13 +1305,24 @@ function Meta({ label, value }: { label: string; value: string }) {
   );
 }
 
+function TruncatedTextWithTooltip({ text, className }: { text: string; className?: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <p className={cn("block w-full truncate", className)}>{text}</p>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-[28rem] whitespace-normal break-words">{text}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function EmptyInventory() {
   return (
     <div className="flex flex-col items-center justify-center rounded-[1.75rem] border border-dashed border-border/60 bg-background/80 px-6 py-12 text-center">
       <PackagePlus className="size-8 text-muted-foreground" />
-      <h3 className="mt-4 text-lg font-semibold">Sin Unidades Aun</h3>
+      <h3 className="mt-4 text-lg font-semibold">Sin unidades aún</h3>
       <p className="mt-2 max-w-md text-sm text-muted-foreground">
-        Crea la primera unidad con fotos y datos minimos para empezar a operar.
+        Crea la primera unidad con fotos y datos mínimos para empezar a operar.
       </p>
     </div>
   );
@@ -1046,6 +1330,6 @@ function EmptyInventory() {
 
 const INVENTORY_MODAL_ACCORDION_KEYS = ["general", "specs", "costs", "publications", "activity", "leads"] as const;
 
-function getSpecValue(unit: InventoryUnit | undefined, key: string) {
+function getSpecValue(unit: InventoryUnit | undefined | null, key: string) {
   return unit?.specs.find((spec) => spec.key === key)?.value ?? "";
 }

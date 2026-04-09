@@ -4,14 +4,30 @@ import { revalidatePath } from "next/cache";
 import { unlink } from "node:fs/promises";
 import path from "node:path";
 
+import { requireSession } from "@/server/auth";
 import { db } from "@/server/db";
-import { requireAccess } from "@/server/tenant-authorization";
+import { canWriteInventoryUnit } from "@/server/inventory-permissions";
 
-async function assertUnit(companyId: string, unitId: string) {
-  return db.productUnit.findFirst({
+async function assertWritableUnit(companyId: string, unitId: string) {
+  const session = await requireSession();
+  if (session.user.activeCompanyId !== companyId) {
+    return { unit: null, error: "Empresa no coincide." };
+  }
+
+  const unit = await db.productUnit.findFirst({
     where: { id: unitId, companyId },
     include: { media: true },
   });
+
+  if (!unit) {
+    return { unit: null, error: "Unidad no encontrada." };
+  }
+
+  if (!(await canWriteInventoryUnit(session.user, unit))) {
+    return { unit: null, error: "No tienes permiso para modificar las fotos de esta unidad." };
+  }
+
+  return { unit, error: null as string | null };
 }
 
 async function removeFileFromDisk(fileUrl: string) {
@@ -26,7 +42,7 @@ async function removeFileFromDisk(fileUrl: string) {
 }
 
 export async function deleteProductMediaAction(formData: FormData) {
-  const session = await requireAccess("market_flow.inventory.edit");
+  const session = await requireSession();
   const companyId = session.user.activeCompanyId;
   const mediaId = String(formData.get("mediaId") || "");
   const unitId = String(formData.get("unitId") || "");
@@ -35,8 +51,12 @@ export async function deleteProductMediaAction(formData: FormData) {
     return { ok: false, error: "Datos incompletos." };
   }
 
-  const unit = await assertUnit(companyId, unitId);
-  const media = unit?.media.find((item) => item.id === mediaId);
+  const { unit, error: unitError } = await assertWritableUnit(companyId, unitId);
+  if (!unit || unitError) {
+    return { ok: false, error: unitError ?? "Unidad no encontrada." };
+  }
+
+  const media = unit.media.find((item) => item.id === mediaId);
 
   if (!media) {
     return { ok: false, error: "Foto no encontrada." };
@@ -67,7 +87,7 @@ export async function deleteProductMediaAction(formData: FormData) {
 }
 
 export async function reorderProductMediaAction(formData: FormData) {
-  const session = await requireAccess("market_flow.inventory.edit");
+  const session = await requireSession();
   const companyId = session.user.activeCompanyId;
   const unitId = String(formData.get("unitId") || "");
   const orderedRaw = String(formData.get("orderedIds") || "").trim();
@@ -76,9 +96,9 @@ export async function reorderProductMediaAction(formData: FormData) {
     return { ok: false, error: "Orden invalido." };
   }
 
-  const unit = await assertUnit(companyId, unitId);
-  if (!unit) {
-    return { ok: false, error: "Unidad no encontrada." };
+  const { unit, error: unitError } = await assertWritableUnit(companyId, unitId);
+  if (!unit || unitError) {
+    return { ok: false, error: unitError ?? "Unidad no encontrada." };
   }
 
   const orderedIds = orderedRaw.split(",").filter(Boolean);
@@ -104,7 +124,7 @@ export async function reorderProductMediaAction(formData: FormData) {
 }
 
 export async function setPrimaryProductMediaAction(formData: FormData) {
-  const session = await requireAccess("market_flow.inventory.edit");
+  const session = await requireSession();
   const companyId = session.user.activeCompanyId;
   const unitId = String(formData.get("unitId") || "");
   const mediaId = String(formData.get("mediaId") || "");
@@ -113,8 +133,12 @@ export async function setPrimaryProductMediaAction(formData: FormData) {
     return { ok: false, error: "Datos incompletos." };
   }
 
-  const unit = await assertUnit(companyId, unitId);
-  const media = unit?.media.find((item) => item.id === mediaId);
+  const { unit, error: unitError } = await assertWritableUnit(companyId, unitId);
+  if (!unit || unitError) {
+    return { ok: false, error: unitError ?? "Unidad no encontrada." };
+  }
+
+  const media = unit.media.find((item) => item.id === mediaId);
 
   if (!media) {
     return { ok: false, error: "Foto no encontrada." };

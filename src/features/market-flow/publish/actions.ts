@@ -66,8 +66,13 @@ export async function savePublicationDraftAction(formData: FormData) {
     },
   });
 
-  revalidatePath("/market-flow/publicar");
-  revalidatePath("/market-flow/inventario");
+  // Tras "Generar con IA" el cliente ya tiene titulo/descripcion en estado; revalidar aqui
+  // dispara refresh del segmento y el modal de Publicar se desmonta / pierde `open`.
+  const skipRevalidate = String(formData.get("ukosSkipRevalidate") || "") === "1";
+  if (!skipRevalidate) {
+    revalidatePath("/market-flow/publicar");
+    revalidatePath("/market-flow/inventario");
+  }
 
   return { ok: true };
 }
@@ -105,7 +110,20 @@ export async function markPublicationAsPublishedAction(formData: FormData) {
   );
   const generatedDescription = sanitizePublicationDescription(generatedDescriptionRaw) || undefined;
   const publishedPrice = parseDecimal(formData.get("publishedPrice"));
-  const externalUrl = String(formData.get("externalUrl") || "").trim() || undefined;
+  const externalUrlRaw = String(formData.get("externalUrl") || "").trim();
+  if (!externalUrlRaw) {
+    return { ok: false, error: "La URL externa del anuncio es obligatoria para publicar o actualizar la publicación." };
+  }
+  let externalUrl: string;
+  try {
+    const parsed = new URL(externalUrlRaw);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return { ok: false, error: "La URL externa debe usar http:// o https://." };
+    }
+    externalUrl = externalUrlRaw;
+  } catch {
+    return { ok: false, error: "La URL externa no es válida. Revisa el enlace completo." };
+  }
   const publishedAtRaw = String(formData.get("publishedAt") || "").trim();
   const publishedAt = publishedAtRaw ? new Date(publishedAtRaw) : new Date();
   const suggestedPriceHigh = parseDecimal(formData.get("suggestedPriceHigh"));

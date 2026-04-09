@@ -21,6 +21,14 @@ services:
       target: dev
     container_name: ukos-app-dev
     restart: unless-stopped
+    cpus: 4.0
+    mem_limit: 10g
+    memswap_limit: 14g
+    # Docker suele heredar resolv.conf del host; con Tailscale / DNS interno a veces falla la resolución
+    # hacia Internet dentro del contenedor (EAI_AGAIN → OpenAI "Connection error"). Forzar DNS públicos.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     env_file:
       - .env
     environment:
@@ -30,16 +38,22 @@ services:
       NEXT_PUBLIC_NEXTAUTH_URL: ${UKOS_DEV_URL:-https://dev-ukos.tech}
       APP_URL: ${UKOS_DEV_URL:-https://dev-ukos.tech}
       DEFAULT_COMPANY_SLUG: ${DEFAULT_COMPANY_SLUG:-ukos-demo}
+      # Preferir IPv4 si el host tiene AAAA roto hacia salida.
+      NODE_OPTIONS: --dns-result-order=ipv4first
       # Bind mount host→contenedor: inotify no siempre dispara; webpack+polling detecta guardados reales.
       WATCHPACK_POLLING: "1"
       CHOKIDAR_USEPOLLING: "1"
+      # Intervalo de polling (ms): más alto = menos falsos “Compiling…” y menos CPU; un poco más lento al detectar guardados.
+      UKOS_DEV_POLL_MS: "2500"
+      # Precalentamiento en background (scripts/warm-next-dev.mjs). En VMs con poca CPU puede competir con la 1ª compilación:
+      # dejar en 0 por defecto; poner UKOS_DEV_WARM=1 cuando quieras tras reinicio (espera ~25s + colas de compilación).
+      UKOS_DEV_WARM: "0"
     ports:
       - "3001:3000"
     volumes:
       - .:/app
       - ukos-app-dev-node-modules:/app/node_modules
-    command: >
-      sh -c "npm install && npx prisma generate && npx prisma migrate deploy && npm run dev:docker"
+    command: ["sh", "scripts/dev-docker-entry.sh"]
     networks:
       - ukos_default
 

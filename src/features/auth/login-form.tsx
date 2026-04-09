@@ -77,7 +77,8 @@ export function LoginForm() {
         <CardTitle className="text-2xl tracking-tight">Entrar a tu espacio operativo</CardTitle>
       </CardHeader>
       <CardContent>
-        <form className="space-y-5" method="post" onSubmit={handleSubmit}>
+        {/* Sin method="post": un POST nativo a /login (JS lento/off) rompe el App Router (JSON.parse vacío → 500). */}
+        <form className="space-y-5" onSubmit={handleSubmit}>
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <Input id="email" name="email" type="email" defaultValue="admin@ukos.local" required />

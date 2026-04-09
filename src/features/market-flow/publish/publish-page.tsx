@@ -1,15 +1,16 @@
 "use client";
 
 import * as React from "react";
-import Image from "next/image";
 import JSZip from "jszip";
 import { useRouter } from "next/navigation";
 import { CheckCheck, Copy, Download, ExternalLink, Images, Loader2, Megaphone, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
+import { InventoryMediaThumbnail } from "@/features/market-flow/inventory/inventory-media-thumbnail";
 import { generatePublicationListingAction } from "@/features/market-flow/publish/publish-ai-actions";
 import { markPublicationAsPublishedAction, savePublicationDraftAction } from "@/features/market-flow/publish/actions";
 import { Badge } from "@/components/ui/badge";
+import { inventoryUploadImageSrc } from "@/lib/inventory-upload-public-url";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -72,6 +73,17 @@ function parsePriceInput(value: string): number | null {
   if (!t) return null;
   const n = Number(t);
   return Number.isFinite(n) ? n : null;
+}
+
+function isValidHttpUrl(value: string): boolean {
+  const t = value.trim();
+  if (!t) return false;
+  try {
+    const u = new URL(t);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 /** En iPhone/Safari el atributo download falla a menudo; Web Share permite Guardar imagen al carrete. */
@@ -143,7 +155,8 @@ export function PublishPage({ entries, initialChannelId }: PublishPageProps) {
       <CardHeader>
         <CardTitle>Cola por canal</CardTitle>
         <CardDescription>
-          Cada unidad pendiente aparece una vez por canal. Los datos se guardan en la base al usar los botones inferiores.
+          Solo entran filas <strong className="text-foreground">pendientes de publicar</strong>. Al marcar como publicado, salen de esta cola pero siguen en{" "}
+          <strong className="text-foreground">Inventario → Publicaciones</strong> (desde ahí puedes reabrir el mismo formulario).
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -187,7 +200,9 @@ export function PublishPage({ entries, initialChannelId }: PublishPageProps) {
                                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">{entry.unit.number}</p>
                                 <h3 className="mt-1 text-base font-semibold text-foreground">{entry.unit.title}</h3>
                               </div>
-                              <Badge variant="secondary">Pendiente</Badge>
+                              <Badge variant={entry.status === "PUBLISHED" ? "default" : "secondary"}>
+                              {entry.status === "PUBLISHED" ? "Publicado" : "Pendiente"}
+                            </Badge>
                             </div>
                             <p className="mt-3 text-sm text-muted-foreground">
                               {entry.generatedTitle || entry.unit.title}
@@ -211,9 +226,11 @@ export function PublishPage({ entries, initialChannelId }: PublishPageProps) {
         ) : (
           <div className="flex flex-col items-center justify-center rounded-[1.75rem] border border-dashed border-border/60 bg-background/90 px-6 py-14 text-center">
             <Megaphone className="size-8 text-muted-foreground" />
-            <h3 className="mt-4 text-lg font-semibold">Sin Pendientes Por Publicar</h3>
+            <h3 className="mt-4 text-lg font-semibold">Sin pendientes en la cola</h3>
             <p className="mt-2 max-w-md text-sm text-muted-foreground">
-              Cuando una unidad esté en estado por publicar y aún no esté marcada en un canal, aparecerá aquí automáticamente.
+              Las unidades ya marcadas como publicadas no se listan aquí: revisa el estado en{" "}
+              <strong className="text-foreground">Inventario</strong>, abre la unidad y en{" "}
+              <strong className="text-foreground">Publicaciones</strong> usa <strong className="text-foreground">Gestionar publicación</strong> para editar copy, precio o enlace.
             </p>
           </div>
         )}
@@ -256,6 +273,8 @@ function PublishEntryForm({ entry, onDone }: { entry: PublishEntry; onDone: () =
   const [aiPending, startAiTransition] = React.useTransition();
   const [zipPending, setZipPending] = React.useState(false);
   const [singlePhotoDownloadId, setSinglePhotoDownloadId] = React.useState<string | null>(null);
+  const [urlFieldError, setUrlFieldError] = React.useState(false);
+  const externalUrlRef = React.useRef<HTMLInputElement>(null);
   const [title, setTitle] = React.useState(entry.generatedTitle || entry.unit.title);
   const [description, setDescription] = React.useState(
     entry.generatedDescription || entry.unit.notes || `${entry.unit.title}. Equipo revisado y listo para publicar.`,
@@ -307,7 +326,7 @@ function PublishEntryForm({ entry, onDone }: { entry: PublishEntry; onDone: () =
 
       for (let index = 0; index < entry.unit.media.length; index += 1) {
         const photo = entry.unit.media[index];
-        const response = await fetch(photo.fileUrl);
+        const response = await fetch(inventoryUploadImageSrc(photo.fileUrl));
         if (!response.ok) {
           throw new Error("No se pudo descargar una imagen");
         }
@@ -334,7 +353,7 @@ function PublishEntryForm({ entry, onDone }: { entry: PublishEntry; onDone: () =
   const downloadSinglePhoto = async (photo: PublishEntry["unit"]["media"][number], index: number) => {
     setSinglePhotoDownloadId(photo.id);
     try {
-      const response = await fetch(photo.fileUrl);
+      const response = await fetch(inventoryUploadImageSrc(photo.fileUrl));
       if (!response.ok) {
         throw new Error("fetch failed");
       }
@@ -384,6 +403,7 @@ function PublishEntryForm({ entry, onDone }: { entry: PublishEntry; onDone: () =
     minPublishedByPolicy != null && publishedNum != null && publishedNum < minPublishedByPolicy;
   const publishedBelowCost =
     costNum != null && publishedNum != null && publishedNum < costNum;
+  const externalUrlOk = isValidHttpUrl(externalUrl);
 
   const runPublicationAi = () => {
     const formData = new FormData();
@@ -410,6 +430,7 @@ function PublishEntryForm({ entry, onDone }: { entry: PublishEntry; onDone: () =
       draftData.set("suggestedPriceHigh", result.data.priceHigh);
       draftData.set("suggestedPriceMid", result.data.priceMid);
       draftData.set("suggestedPriceLow", result.data.priceLow);
+      draftData.set("ukosSkipRevalidate", "1");
       const draftResult = await savePublicationDraftAction(draftData);
 
       if (!draftResult.ok) {
@@ -422,6 +443,18 @@ function PublishEntryForm({ entry, onDone }: { entry: PublishEntry; onDone: () =
   };
 
   const markPublished = () => {
+    const urlTrim = externalUrl.trim();
+    if (!urlTrim || !isValidHttpUrl(urlTrim)) {
+      setUrlFieldError(true);
+      toast.error("Debes agregar la URL externa antes de marcar como publicado.");
+      setTimeout(() => {
+        externalUrlRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        externalUrlRef.current?.focus();
+      }, 50);
+      return;
+    }
+    setUrlFieldError(false);
+
     if (minPublishedByPolicy != null && publishedNum != null && publishedNum < minPublishedByPolicy) {
       toast.error(
         publishedBelowCost && costNum != null
@@ -449,8 +482,14 @@ function PublishEntryForm({ entry, onDone }: { entry: PublishEntry; onDone: () =
         return;
       }
 
-      toast.success(`${entry.unit.number} marcado como publicado en ${entry.channel.displayName}.`);
+      const wasPublished = entry.status === "PUBLISHED";
+      toast.success(
+        wasPublished
+          ? `Publicación actualizada en ${entry.channel.displayName}.`
+          : `${entry.unit.number} marcado como publicado en ${entry.channel.displayName}.`,
+      );
       onDone();
+      router.refresh();
     });
   };
 
@@ -459,34 +498,54 @@ function PublishEntryForm({ entry, onDone }: { entry: PublishEntry; onDone: () =
     toast.success(`${label} copiado al portapapeles.`);
   };
 
+  const pricingSectionRef = React.useRef<HTMLDivElement>(null);
+  const firstPhoto = entry.unit.media[0];
+
   return (
-    <div className="space-y-6 pb-4">
-      <div className="grid gap-4 2xl:grid-cols-[1.15fr_0.85fr]">
-        <Card className="rounded-[1.75rem] border-border/60 bg-card/90 shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-lg">Fotos de la unidad</CardTitle>
-            <CardDescription>Boton en cada foto para descargar; ZIP para todas. En iPhone: compartir → Guardar imagen.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+    <div className="space-y-8 pb-28">
+      <div className="flex flex-col gap-4 border-b border-border/60 pb-5 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 space-y-1">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Artículo en venta</p>
+          <h2 className="text-lg font-semibold tracking-tight text-foreground sm:text-xl">{entry.channel.displayName}</h2>
+          <p className="text-sm text-muted-foreground">
+            {entry.unit.number} · {entry.unit.title}
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-11 shrink-0 rounded-2xl px-5"
+          disabled={pending || aiPending}
+          onClick={saveDraft}
+        >
+          Guardar borrador
+        </Button>
+      </div>
+
+      <div className="grid gap-10 lg:grid-cols-[minmax(0,440px)_minmax(280px,1fr)] xl:grid-cols-[minmax(0,460px)_minmax(320px,1fr)] xl:gap-14">
+        <div className="space-y-8">
+
+          {/* ── 1. FOTOS (primero) ── */}
+          <section
+            className={`rounded-2xl border-2 border-dashed p-4 sm:p-5 ${channelAccent[entry.channel.code] || "border-border/60 bg-muted/20"}`}
+          >
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-foreground">Fotos</p>
+                <p className="text-xs text-muted-foreground">
+                  {entry.unit.media.length}/10 · Descarga por foto o ZIP. La subida nueva es desde Inventario o móvil.
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               {entry.unit.media.map((photo, index) => (
-                <div
-                  key={photo.id}
-                  className="relative overflow-hidden rounded-2xl border border-border/60 bg-muted/40"
-                >
-                  <Image
-                    src={photo.fileUrl}
-                    alt={photo.fileName || `Foto ${index + 1} de la unidad`}
-                    width={320}
-                    height={160}
-                    unoptimized
-                    className="h-32 w-full object-cover"
-                  />
+                <div key={photo.id} className="relative">
+                  <InventoryMediaThumbnail src={photo.fileUrl} alt={photo.fileName || `Foto ${index + 1}`} />
                   <Button
                     type="button"
                     size="icon"
                     variant="secondary"
-                    className="absolute bottom-1.5 right-1.5 z-10 size-9 rounded-full border border-border/50 bg-background/95 shadow-md backdrop-blur-sm hover:bg-background"
+                    className="absolute bottom-2 right-2 z-10 size-9 rounded-full border border-border/50 bg-background/95 shadow-md backdrop-blur-sm hover:bg-background"
                     disabled={singlePhotoDownloadId === photo.id}
                     onClick={(event) => {
                       event.preventDefault();
@@ -504,108 +563,96 @@ function PublishEntryForm({ entry, onDone }: { entry: PublishEntry; onDone: () =
                 </div>
               ))}
             </div>
-            <Button variant="outline" className="rounded-2xl" disabled={zipPending} onClick={() => void downloadImagesZip()}>
-              {zipPending ? <Loader2 className="size-4 animate-spin" /> : <Images className="size-4" />}
-              Descargar fotos (ZIP)
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card className={`rounded-[1.75rem] border shadow-sm ${channelAccent[entry.channel.code] || "border-border/60 bg-card/90"}`}>
-          <CardHeader>
-            <CardTitle className="text-lg">Contexto del canal</CardTitle>
-            <CardDescription>{entry.channel.displayName} · {entry.unit.number}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm text-muted-foreground">
-            <p>
-              Estado de la unidad:{" "}
-              <strong className="text-foreground">{unitStatusLabels[entry.unit.status] ?? entry.unit.status}</strong>
-            </p>
-            <p>Costo actual: <strong className="text-foreground">{entry.unit.costAmount ? `$${entry.unit.costAmount}` : "Pendiente"}</strong></p>
-            <p>Precio de venta objetivo: <strong className="text-foreground">{entry.unit.salePrice ? `$${entry.unit.salePrice}` : "Pendiente"}</strong></p>
-            <div className="rounded-2xl border border-border/60 bg-background/80 p-4">
-              <p className="font-medium text-foreground">Especificaciones</p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {entry.unit.specs.map((spec) => (
-                  <Badge key={spec.id} variant="outline">{spec.key}: {spec.value}</Badge>
-                ))}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 2xl:grid-cols-[1fr_0.9fr]">
-        <Card className="rounded-[1.75rem] border-border/60 bg-card/90 shadow-sm">
-          <CardHeader className="flex flex-col gap-3 space-y-0 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0 space-y-1.5">
-              <CardTitle className="text-lg">Texto para el canal</CardTitle>
-              <CardDescription>
-                Edita a mano o regenera con IA (cada clic vuelve a generar todo). Borrador guarda titulo y descripcion.
-              </CardDescription>
-            </div>
-            <Button
-              type="button"
-              variant="secondary"
-              className="h-10 shrink-0 rounded-2xl sm:mt-0"
-              disabled={aiPending || !entry.unit.media.length}
-              onClick={() => void runPublicationAi()}
-            >
-              {aiPending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-              Generar con IA
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {!entry.unit.media.length ? (
-              <p className="text-xs text-muted-foreground">Necesitas al menos una foto en la unidad para usar IA.</p>
+            {entry.unit.media.length === 0 ? (
+              <p className="mt-4 text-center text-sm text-muted-foreground">Aún no hay fotos en esta unidad.</p>
             ) : null}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <Label htmlFor={`title-${entry.id}`}>Titulo</Label>
-                <Button type="button" variant="ghost" size="sm" className="rounded-full" onClick={() => copyText(title, "Titulo")}>
-                  <Copy className="size-4" />
-                  Copiar titulo
-                </Button>
-              </div>
-              <Input id={`title-${entry.id}`} value={title} onChange={(event) => setTitle(event.target.value)} className="h-11 rounded-2xl" />
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <Label htmlFor={`description-${entry.id}`}>Descripcion</Label>
-                <Button type="button" variant="ghost" size="sm" className="rounded-full" onClick={() => copyText(description, "Descripcion")}>
-                  <Copy className="size-4" />
-                  Copiar descripcion
-                </Button>
-              </div>
-              <Textarea
-                id={`description-${entry.id}`}
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                className="min-h-64 rounded-2xl whitespace-pre-wrap"
-              />
-            </div>
-          </CardContent>
-        </Card>
+            <Button
+              variant="outline"
+              className="mt-4 w-full rounded-2xl sm:w-auto"
+              disabled={zipPending}
+              onClick={() => void downloadImagesZip()}
+            >
+              {zipPending ? <Loader2 className="size-4 animate-spin" /> : <Images className="size-4" />}
+              Descargar todas en ZIP
+            </Button>
+          </section>
 
-        <Card className="rounded-[1.75rem] border-border/60 bg-card/90 shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-lg">Precio y datos de publicacion</CardTitle>
-            <CardDescription>Rango sugerido editable y campos finales al marcar como publicado.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-3">
-              <PriceField label="Precio Alto" value={suggestedHigh} onChange={setSuggestedHigh} />
-              <PriceField label="Precio Medio" value={suggestedMid} onChange={setSuggestedMid} />
-              <PriceField label="Precio Bajo" value={suggestedLow} onChange={setSuggestedLow} />
+          {/* ── 2. TÍTULO (con botón IA discreto) ── */}
+          <div>
+            <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Obligatorio</p>
+            <div className="space-y-5">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor={`title-${entry.id}`}>Título</Label>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="h-8 rounded-2xl px-3 text-xs gap-1"
+                      disabled={aiPending || !entry.unit.media.length}
+                      onClick={() => void runPublicationAi()}
+                    >
+                      {aiPending ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+                      {aiPending ? "Generando..." : "Generar con IA"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="rounded-full"
+                      onClick={() => copyText(title, "Titulo")}
+                    >
+                      <Copy className="size-4" />
+                      Copiar
+                    </Button>
+                  </div>
+                </div>
+                <Input
+                  id={`title-${entry.id}`}
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  className="h-12 rounded-2xl text-base"
+                  placeholder="Ej: Dell Latitude 5420 i5 11th Gen 8GB RAM SSD"
+                />
+              </div>
+
+              {/* ── 3. DESCRIPCIÓN ── */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor={`description-${entry.id}`}>Descripción</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="rounded-full"
+                    onClick={() => copyText(description, "Descripcion")}
+                  >
+                    <Copy className="size-4" />
+                    Copiar
+                  </Button>
+                </div>
+                <Textarea
+                  id={`description-${entry.id}`}
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  className="min-h-56 rounded-2xl text-base whitespace-pre-wrap"
+                />
+              </div>
             </div>
+          </div>
+
+          {/* ── PRECIO + CATEGORÍA ── */}
+          <div className="space-y-5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Publicación</p>
             <div className="space-y-2">
-              <Label htmlFor={`published-price-${entry.id}`}>Precio Publicado</Label>
+              <Label htmlFor={`published-price-${entry.id}`}>Precio</Label>
               <Input
                 id={`published-price-${entry.id}`}
                 value={publishedPrice}
                 onChange={(event) => setPublishedPrice(event.target.value)}
                 className={cn(
-                  "h-11 rounded-2xl",
+                  "h-12 rounded-2xl text-base",
                   publishedViolatesMargin &&
                     "border-destructive text-destructive focus-visible:border-destructive focus-visible:ring-destructive/40",
                 )}
@@ -613,33 +660,180 @@ function PublishEntryForm({ entry, onDone }: { entry: PublishEntry; onDone: () =
               {publishedViolatesMargin && minPublishedByPolicy != null ? (
                 <p className="text-sm text-destructive">
                   {publishedBelowCost && costNum != null
-                    ? `Por debajo del costo (${costNum.toFixed(2)}). Politica minima: 30% sobre costo (al menos ${minPublishedByPolicy.toFixed(2)}).`
-                    : `Debe ser al menos 30% sobre el costo. Minimo permitido: ${minPublishedByPolicy.toFixed(2)}.`}
+                    ? `Por debajo del costo (${costNum.toFixed(2)}). Mínimo con margen 30%: ${minPublishedByPolicy.toFixed(2)}.`
+                    : `Mínimo permitido (30% sobre costo): ${minPublishedByPolicy.toFixed(2)}.`}
                 </p>
               ) : minPublishedByPolicy != null ? (
                 <p className="text-xs text-muted-foreground">
-                  Politica: precio publicado ≥ 30% sobre costo (referencia {minPublishedByPolicy.toFixed(2)}).
+                  Referencia política 30% sobre costo: {minPublishedByPolicy.toFixed(2)}.
                 </p>
               ) : null}
             </div>
             <div className="space-y-2">
-              <Label htmlFor={`external-url-${entry.id}`}>URL Externa</Label>
-              <div className="flex gap-2">
-                <Input id={`external-url-${entry.id}`} value={externalUrl} onChange={(event) => setExternalUrl(event.target.value)} placeholder="https://..." className="h-11 rounded-2xl" />
-                <Button type="button" variant="outline" className="rounded-2xl" onClick={() => externalUrl ? window.open(externalUrl, "_blank") : toast.info("Agrega primero la URL externa.") }>
-                  <ExternalLink className="size-4" />
-                </Button>
+              <Label>Categoría</Label>
+              <div className="flex min-h-12 items-center rounded-2xl border border-input bg-muted/40 px-4 text-sm text-muted-foreground">
+                {entry.unit.specs.length
+                  ? entry.unit.specs
+                      .slice(0, 3)
+                      .map((s) => `${s.key}: ${s.value}`)
+                      .join(" · ")
+                  : "Sin categoría en especificaciones"}
               </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor={`published-at-${entry.id}`}>Fecha De Publicacion</Label>
-              <Input id={`published-at-${entry.id}`} type="datetime-local" value={publishedAt} onChange={(event) => setPublishedAt(event.target.value)} className="h-11 rounded-2xl" />
+          </div>
+
+          <Button
+            type="button"
+            variant="secondary"
+            className="h-12 w-full rounded-2xl text-base lg:hidden"
+            onClick={() => pricingSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+          >
+            Siguiente
+          </Button>
+
+          {/* ── PRECIO SUGERIDO + URL + FECHA ── */}
+          <div ref={pricingSectionRef}>
+            <Card className="rounded-2xl border-border/60 bg-card/90 shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-base">Precio sugerido y publicación</CardTitle>
+                <CardDescription>Rango de precios, URL externa y fecha.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <PriceField label="Precio alto" value={suggestedHigh} onChange={setSuggestedHigh} />
+                  <PriceField label="Precio medio" value={suggestedMid} onChange={setSuggestedMid} />
+                  <PriceField label="Precio bajo" value={suggestedLow} onChange={setSuggestedLow} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor={`external-url-${entry.id}`}>
+                    URL externa <span className="text-destructive">*</span>
+                  </Label>
+                  <p className="text-xs text-muted-foreground">Obligatoria para marcar como publicado.</p>
+                  <div className="flex gap-2">
+                    <Input
+                      ref={externalUrlRef}
+                      id={`external-url-${entry.id}`}
+                      value={externalUrl}
+                      onChange={(event) => {
+                        setExternalUrl(event.target.value);
+                        setUrlFieldError(false);
+                      }}
+                      placeholder="https://..."
+                      className={cn(
+                        "h-11 rounded-2xl",
+                        (urlFieldError || (externalUrl.trim().length > 0 && !externalUrlOk)) &&
+                          "border-destructive ring-2 ring-destructive/30",
+                      )}
+                      aria-invalid={urlFieldError || (externalUrl.trim().length > 0 && !externalUrlOk)}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-2xl"
+                      onClick={() =>
+                        externalUrl ? window.open(externalUrl, "_blank") : toast.info("Agrega primero la URL externa.")
+                      }
+                    >
+                      <ExternalLink className="size-4" />
+                    </Button>
+                  </div>
+                  {urlFieldError && (
+                    <p className="text-sm font-medium text-destructive">
+                      Debes agregar la URL externa antes de marcar como publicado.
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor={`published-at-${entry.id}`}>Fecha de publicación</Label>
+                  <Input
+                    id={`published-at-${entry.id}`}
+                    type="datetime-local"
+                    value={publishedAt}
+                    onChange={(event) => setPublishedAt(event.target.value)}
+                    className="h-11 rounded-2xl"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* ── CONTEXTO DEL CANAL ── */}
+          <Card className={`rounded-2xl border shadow-sm ${channelAccent[entry.channel.code] || "border-border/60 bg-card/90"}`}>
+            <CardHeader>
+              <CardTitle className="text-base">Contexto del canal</CardTitle>
+              <CardDescription>{entry.channel.displayName}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm text-muted-foreground">
+              <p>
+                Estado:{" "}
+                <strong className="text-foreground">{unitStatusLabels[entry.unit.status] ?? entry.unit.status}</strong>
+              </p>
+              <p>
+                Costo:{" "}
+                <strong className="text-foreground">{entry.unit.costAmount ? `$${entry.unit.costAmount}` : "Pendiente"}</strong>
+              </p>
+              <p>
+                Precio venta objetivo:{" "}
+                <strong className="text-foreground">{entry.unit.salePrice ? `$${entry.unit.salePrice}` : "Pendiente"}</strong>
+              </p>
+              <div className="rounded-2xl border border-border/60 bg-background/80 p-4">
+                <p className="font-medium text-foreground">Especificaciones</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {entry.unit.specs.map((spec) => (
+                    <Badge key={spec.id} variant="outline">
+                      {spec.key}: {spec.value}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <aside className="min-w-0 lg:pl-2">
+          <div className="lg:sticky lg:top-4">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Vista previa</p>
+            <div className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-md">
+              <div className="grid grid-cols-1 sm:grid-cols-2">
+                <div className="relative aspect-square bg-muted">
+                  {firstPhoto ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- misma URL pública que miniaturas
+                    <img
+                      src={inventoryUploadImageSrc(firstPhoto.fileUrl)}
+                      alt=""
+                      className="absolute inset-0 h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full min-h-[200px] items-center justify-center p-6 text-center text-sm text-muted-foreground">
+                      Vista previa de la publicación: añade fotos en inventario para ver la imagen aquí.
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-col gap-2 border-t border-border/60 p-4 sm:border-t-0 sm:border-l">
+                  <p className="line-clamp-2 text-base font-bold leading-tight text-foreground">
+                    {title.trim() || entry.unit.title}
+                  </p>
+                  <p className="text-lg font-semibold text-emerald-600 dark:text-emerald-400">
+                    {publishedPrice.trim() ? `$${publishedPrice.trim()}` : "Precio pendiente"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Publicado hace unos segundos · {entry.channel.displayName}
+                  </p>
+                  <div className="border-t border-border/50 pt-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Detalles</p>
+                    <p className="mt-1 line-clamp-6 whitespace-pre-wrap text-sm text-muted-foreground">{description}</p>
+                  </div>
+                  <Button type="button" variant="secondary" className="mt-2 h-10 cursor-default rounded-xl opacity-70" disabled>
+                    Enviar mensaje
+                  </Button>
+                </div>
+              </div>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </aside>
       </div>
 
-      <div className="sticky bottom-0 z-10 flex flex-col gap-3 border-t border-border/60 bg-background/95 py-3 backdrop-blur lg:flex-row lg:justify-end">
+      <div className="sticky bottom-0 z-10 flex flex-col gap-3 border-t border-border/60 bg-background/95 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/80 lg:flex-row lg:justify-end">
         <Button type="button" variant="outline" className="h-12 rounded-2xl" disabled={pending || aiPending} onClick={saveDraft}>
           Guardar borrador del canal
         </Button>
@@ -650,7 +844,7 @@ function PublishEntryForm({ entry, onDone }: { entry: PublishEntry; onDone: () =
           onClick={markPublished}
         >
           <CheckCheck className="size-4" />
-          Marcar como publicado
+          {entry.status === "PUBLISHED" ? "Actualizar publicación" : "Marcar como publicado"}
         </Button>
       </div>
     </div>

@@ -28,6 +28,7 @@ export default async function MarketFlowInventoryPage({ searchParams }: PageProp
         initialStatus={initialStatus}
         canCreate={access.has("market_flow.inventory.create")}
         canEdit={access.has("market_flow.inventory.edit")}
+        canDelete={access.has("market_flow.inventory.delete")}
       />
     </ProtectedPageShell>
   );

@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { ModuleKey } from "@prisma/client";
+import { APIConnectionError, APIConnectionTimeoutError } from "openai";
 
 import { runInventoryVisionAnalysis, type ImagePart } from "@/server/market-flow/inventory-ai-openai";
 import type { InventoryVisionResult } from "@/server/market-flow/inventory-ai-schema";
@@ -155,6 +156,25 @@ export async function analyzeInventoryProductPhotosAction(formData: FormData): P
 
     return { ok: true, data };
   } catch (e) {
+    if (e instanceof APIConnectionTimeoutError) {
+      console.error("[analyzeInventoryProductPhotosAction] OpenAI timeout", e);
+      return {
+        ok: false,
+        error:
+          "OpenAI tardó demasiado en responder. Prueba de nuevo; si persiste, usa menos fotos o imágenes más ligeras.",
+      };
+    }
+    if (e instanceof APIConnectionError) {
+      const cause = e.cause;
+      console.error("[analyzeInventoryProductPhotosAction] OpenAI connection failed", cause ?? e);
+      return {
+        ok: false,
+        error:
+          "El servidor de UKOS no pudo conectar con OpenAI (no es fallo de tu navegador). " +
+          "Comprueba que el host o contenedor Docker tenga salida HTTPS a api.openai.com, sin firewall bloqueando, " +
+          "y DNS funcionando. Si usas proxy corporativo, configura las variables de entorno que use Node para HTTPS.",
+      };
+    }
     const message = e instanceof Error ? e.message : "Error al llamar a OpenAI.";
     console.error("[analyzeInventoryProductPhotosAction]", e);
     return { ok: false, error: message };

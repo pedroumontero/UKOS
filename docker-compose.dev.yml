@@ -4,10 +4,15 @@ services:
   app:
     build:
       target: dev
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     environment:
+      NODE_OPTIONS: --dns-result-order=ipv4first
       WATCHPACK_POLLING: "1"
       CHOKIDAR_USEPOLLING: "1"
+      UKOS_DEV_POLL_MS: "1500"
     volumes:
       - .:/app
       - /app/node_modules
-    command: sh -c "npm install && npx prisma generate && npx prisma migrate deploy && npm run dev:docker"
+    command: ["sh", "scripts/dev-docker-entry.sh"]

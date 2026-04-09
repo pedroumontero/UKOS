@@ -25,6 +25,9 @@ services:
     container_name: ukos-app
     depends_on:
       - db
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     environment:
       DATABASE_URL: postgresql://ukos:ukos@db:5432/ukos?schema=public
       AUTH_SECRET: ${AUTH_SECRET:-change-me-super-secret-auth-key}
@@ -34,6 +37,7 @@ services:
       NEXTAUTH_URL: ${UKOS_PUBLIC_BASE_URL:-http://localhost:3000}
       APP_URL: ${UKOS_PUBLIC_BASE_URL:-http://localhost:3000}
       DEFAULT_COMPANY_SLUG: ${DEFAULT_COMPANY_SLUG:-ukos-demo}
+      NODE_OPTIONS: --dns-result-order=ipv4first
     ports:
       - "3000:3000"
     volumes:

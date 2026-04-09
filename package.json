@@ -5,7 +5,7 @@
   "scripts": {
     "postinstall": "prisma generate",
     "dev": "next dev --hostname 0.0.0.0",
-    "dev:docker": "WATCHPACK_POLLING=1 CHOKIDAR_USEPOLLING=1 next dev --hostname 0.0.0.0 --webpack",
+    "dev:docker": "WATCHPACK_POLLING=1 CHOKIDAR_USEPOLLING=1 next dev --hostname 0.0.0.0 --turbopack",
     "clean": "rm -rf .next",
     "dev:reset-cache": "bash scripts/reset-dev-next-cache.sh",
     "build": "next build",
@@ -42,6 +42,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-hook-form": "^7.72.0",
+    "sharp": "^0.34.5",
     "shadcn": "^4.1.2",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.5.0",
