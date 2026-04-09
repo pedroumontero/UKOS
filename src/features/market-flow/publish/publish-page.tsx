@@ -840,7 +840,7 @@ function PublishEntryForm({ entry, onDone }: { entry: PublishEntry; onDone: () =
         <Button
           type="button"
           className="h-12 rounded-2xl px-6 text-base"
-          disabled={pending || aiPending || (publishedViolatesMargin && publishedNum != null)}
+          disabled={pending || aiPending}
           onClick={markPublished}
         >
           <CheckCheck className="size-4" />
